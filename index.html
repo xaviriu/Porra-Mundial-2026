@@ -1120,22 +1120,26 @@ function renderHeader() {
 
 // ── RENDER INICIO ──────────────────────────────────────────────────
 function renderInicio() {
-  const todayM=S.matches.filter(m=>isToday(m.date));
-  const tomorrowM=S.matches.filter(m=>isTomorrow(m.date));
-  const recentM=S.matches.filter(m=>isPast(m.date)&&m.homeG!==null).slice(-4);
+  const todayM   = S.matches.filter(m=>isToday(m.date));
+  const tomorrowM= S.matches.filter(m=>isTomorrow(m.date));
+  const futureM  = S.matches.filter(m=>!isPast(m.date)&&!isToday(m.date)&&!isTomorrow(m.date));
+  const recentM  = S.matches.filter(m=>(isPast(m.date)||isToday(m.date))&&m.homeG!==null).slice(-4);
 
   let hero='';
-  if (todayM.length) {
+  if(todayM.length){
     hero=`<div class="card" style="margin-bottom:14px"><div class="card-label">Partidos de hoy</div><div class="mgrid">${todayM.map(mCard).join('')}</div></div>`;
-  } else if (tomorrowM.length) {
-    hero=`<div class="card" style="margin-bottom:14px"><div class="card-label">Partidos de mañana</div><div class="mgrid">${tomorrowM.map(mCard).join('')}</div></div>`;
-  } else if (!S.matches.length) {
+  } else if(tomorrowM.length){
+    hero=`<div class="card" style="margin-bottom:14px"><div class="card-label">Partidos de mañana</div><div class="mgrid">${tomorrowM.map(mCard).join('')}</div></div>
+          <div class="card" style="margin-bottom:14px"><div class="card-label">Próximos partidos</div><div class="mgrid">${futureM.slice(0,6).map(mCard).join('')}</div></div>`;
+  } else if(futureM.length){
+    hero=`<div class="card" style="margin-bottom:14px"><div class="card-label">Próximos partidos</div><div class="mgrid">${futureM.slice(0,8).map(mCard).join('')}</div></div>`;
+  } else if(!S.matches.length){
     hero=`<div class="card"><div class="empty"><div class="empty-icon">⚽</div><h3>Datos pendientes</h3><p>El administrador debe subir el Excel con los datos desde el panel Admin</p></div></div>`;
   }
   document.getElementById('ini-hero').innerHTML=hero;
 
   let left='';
-  if (recentM.length) {
+  if(recentM.length){
     left=`<div class="card"><div class="card-label">Ultimos resultados</div><div class="mgrid" style="grid-template-columns:1fr">${recentM.map(mCard).join('')}</div></div>`;
   }
   document.getElementById('ini-left').innerHTML=left;
@@ -1455,6 +1459,14 @@ function renderAdmin() {
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:4px">Toca a cada jugador para subir su foto. Se guardan en el navegador.</p>
       <div class="photo-grid" id="photo-grid-wrap"></div>
     </div>` : ''}
+    <div class="card">
+      <div class="card-label" style="margin-bottom:6px">Calendario de partidos</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Los 72 partidos de fase de grupos estan precargados con horarios en hora española (CET). Si algo falta o hay un cambio oficial, recarga.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost" style="font-size:.75rem" onclick="mergeSchedule();renderAll();this.textContent='✓ Calendario actualizado'">Recargar calendario</button>
+        <span style="font-size:.7rem;color:var(--muted)">${S.matches.filter(m=>m.phase==='groups').length} / 72 partidos cargados</span>
+      </div>
+    </div>
     <div class="card">
       <div class="card-label">Como funciona</div>
       <ol class="instr">
@@ -2133,7 +2145,112 @@ document.querySelectorAll('.nav-link, .bn-item').forEach(btn=>{
   btn.addEventListener('click',()=>switchTab(btn.dataset.tab));
 });
 
-// ── SEED DATA (primer partido, 11/06/2026) ─────────────────────────
+// ── FULL SCHEDULE — 72 group stage matches (times in CET/Madrid) ───
+const FULL_SCHEDULE = [
+  // ── GRUPO A ──────────────────────────────────────────────────────
+  {id:1,  group:'A',date:'11/06/2026',time:'21:00',round:'J1',home:'México',              away:'Sudáfrica',          homeG:2,   awayG:0},
+  {id:2,  group:'A',date:'12/06/2026',time:'04:00',round:'J1',home:'Corea del Sur',       away:'República Checa',    homeG:2,   awayG:1},
+  {id:3,  group:'A',date:'18/06/2026',time:'18:00',round:'J2',home:'República Checa',     away:'Sudáfrica',          homeG:null,awayG:null},
+  {id:4,  group:'A',date:'19/06/2026',time:'05:00',round:'J2',home:'México',              away:'Corea del Sur',      homeG:null,awayG:null},
+  {id:5,  group:'A',date:'25/06/2026',time:'03:00',round:'J3',home:'República Checa',     away:'México',             homeG:null,awayG:null},
+  {id:6,  group:'A',date:'25/06/2026',time:'03:00',round:'J3',home:'Sudáfrica',           away:'Corea del Sur',      homeG:null,awayG:null},
+  // ── GRUPO B ──────────────────────────────────────────────────────
+  {id:7,  group:'B',date:'12/06/2026',time:'21:00',round:'J1',home:'Canadá',              away:'Bosnia y Herzegovina',homeG:null,awayG:null},
+  {id:8,  group:'B',date:'13/06/2026',time:'21:00',round:'J1',home:'Catar',               away:'Suiza',              homeG:null,awayG:null},
+  {id:9,  group:'B',date:'18/06/2026',time:'21:00',round:'J2',home:'Suiza',               away:'Bosnia y Herzegovina',homeG:null,awayG:null},
+  {id:10, group:'B',date:'19/06/2026',time:'00:00',round:'J2',home:'Canadá',              away:'Catar',              homeG:null,awayG:null},
+  {id:11, group:'B',date:'24/06/2026',time:'21:00',round:'J3',home:'Suiza',               away:'Canadá',             homeG:null,awayG:null},
+  {id:12, group:'B',date:'24/06/2026',time:'21:00',round:'J3',home:'Bosnia y Herzegovina',away:'Catar',              homeG:null,awayG:null},
+  // ── GRUPO C ──────────────────────────────────────────────────────
+  {id:13, group:'C',date:'14/06/2026',time:'00:00',round:'J1',home:'Brasil',              away:'Marruecos',          homeG:null,awayG:null},
+  {id:14, group:'C',date:'14/06/2026',time:'03:00',round:'J1',home:'Haití',               away:'Escocia',            homeG:null,awayG:null},
+  {id:15, group:'C',date:'20/06/2026',time:'00:00',round:'J2',home:'Escocia',             away:'Marruecos',          homeG:null,awayG:null},
+  {id:16, group:'C',date:'20/06/2026',time:'03:00',round:'J2',home:'Brasil',              away:'Haití',              homeG:null,awayG:null},
+  {id:17, group:'C',date:'25/06/2026',time:'00:00',round:'J3',home:'Escocia',             away:'Brasil',             homeG:null,awayG:null},
+  {id:18, group:'C',date:'25/06/2026',time:'00:00',round:'J3',home:'Marruecos',           away:'Haití',              homeG:null,awayG:null},
+  // ── GRUPO D ──────────────────────────────────────────────────────
+  {id:19, group:'D',date:'13/06/2026',time:'03:00',round:'J1',home:'Estados Unidos',      away:'Paraguay',           homeG:null,awayG:null},
+  {id:20, group:'D',date:'14/06/2026',time:'06:00',round:'J1',home:'Australia',           away:'Turquía',            homeG:null,awayG:null},
+  {id:21, group:'D',date:'19/06/2026',time:'21:00',round:'J2',home:'Estados Unidos',      away:'Australia',          homeG:null,awayG:null},
+  {id:22, group:'D',date:'20/06/2026',time:'06:00',round:'J2',home:'Turquía',             away:'Paraguay',           homeG:null,awayG:null},
+  {id:23, group:'D',date:'26/06/2026',time:'04:00',round:'J3',home:'Turquía',             away:'Estados Unidos',     homeG:null,awayG:null},
+  {id:24, group:'D',date:'26/06/2026',time:'04:00',round:'J3',home:'Paraguay',            away:'Australia',          homeG:null,awayG:null},
+  // ── GRUPO E ──────────────────────────────────────────────────────
+  {id:25, group:'E',date:'14/06/2026',time:'19:00',round:'J1',home:'Alemania',            away:'Curazao',            homeG:null,awayG:null},
+  {id:26, group:'E',date:'15/06/2026',time:'01:00',round:'J1',home:'Costa de Marfil',     away:'Ecuador',            homeG:null,awayG:null},
+  {id:27, group:'E',date:'20/06/2026',time:'22:00',round:'J2',home:'Alemania',            away:'Costa de Marfil',    homeG:null,awayG:null},
+  {id:28, group:'E',date:'21/06/2026',time:'02:00',round:'J2',home:'Ecuador',             away:'Curazao',            homeG:null,awayG:null},
+  {id:29, group:'E',date:'25/06/2026',time:'22:00',round:'J3',home:'Ecuador',             away:'Alemania',           homeG:null,awayG:null},
+  {id:30, group:'E',date:'25/06/2026',time:'22:00',round:'J3',home:'Curazao',             away:'Costa de Marfil',    homeG:null,awayG:null},
+  // ── GRUPO F ──────────────────────────────────────────────────────
+  {id:31, group:'F',date:'14/06/2026',time:'22:00',round:'J1',home:'Países Bajos',        away:'Japón',              homeG:null,awayG:null},
+  {id:32, group:'F',date:'15/06/2026',time:'04:00',round:'J1',home:'Suecia',              away:'Túnez',              homeG:null,awayG:null},
+  {id:33, group:'F',date:'20/06/2026',time:'19:00',round:'J2',home:'Países Bajos',        away:'Suecia',             homeG:null,awayG:null},
+  {id:34, group:'F',date:'21/06/2026',time:'06:00',round:'J2',home:'Túnez',               away:'Japón',              homeG:null,awayG:null},
+  {id:35, group:'F',date:'26/06/2026',time:'01:00',round:'J3',home:'Japón',               away:'Suecia',             homeG:null,awayG:null},
+  {id:36, group:'F',date:'26/06/2026',time:'01:00',round:'J3',home:'Túnez',               away:'Países Bajos',       homeG:null,awayG:null},
+  // ── GRUPO G ──────────────────────────────────────────────────────
+  {id:37, group:'G',date:'16/06/2026',time:'00:00',round:'J1',home:'Bélgica',             away:'Egipto',             homeG:null,awayG:null},
+  {id:38, group:'G',date:'16/06/2026',time:'06:00',round:'J1',home:'Irán',                away:'Nueva Zelanda',      homeG:null,awayG:null},
+  {id:39, group:'G',date:'21/06/2026',time:'21:00',round:'J2',home:'Bélgica',             away:'Irán',               homeG:null,awayG:null},
+  {id:40, group:'G',date:'22/06/2026',time:'03:00',round:'J2',home:'Nueva Zelanda',       away:'Egipto',             homeG:null,awayG:null},
+  {id:41, group:'G',date:'27/06/2026',time:'05:00',round:'J3',home:'Egipto',              away:'Irán',               homeG:null,awayG:null},
+  {id:42, group:'G',date:'27/06/2026',time:'05:00',round:'J3',home:'Nueva Zelanda',       away:'Bélgica',            homeG:null,awayG:null},
+  // ── GRUPO H ──────────────────────────────────────────────────────
+  {id:43, group:'H',date:'15/06/2026',time:'19:00',round:'J1',home:'España',              away:'Cabo Verde',         homeG:null,awayG:null},
+  {id:44, group:'H',date:'16/06/2026',time:'00:00',round:'J1',home:'Arabia Saudita',      away:'Uruguay',            homeG:null,awayG:null},
+  {id:45, group:'H',date:'21/06/2026',time:'18:00',round:'J2',home:'España',              away:'Arabia Saudita',     homeG:null,awayG:null},
+  {id:46, group:'H',date:'22/06/2026',time:'00:00',round:'J2',home:'Uruguay',             away:'Cabo Verde',         homeG:null,awayG:null},
+  {id:47, group:'H',date:'27/06/2026',time:'02:00',round:'J3',home:'Cabo Verde',          away:'Arabia Saudita',     homeG:null,awayG:null},
+  {id:48, group:'H',date:'27/06/2026',time:'02:00',round:'J3',home:'Uruguay',             away:'España',             homeG:null,awayG:null},
+  // ── GRUPO I ──────────────────────────────────────────────────────
+  {id:49, group:'I',date:'16/06/2026',time:'21:00',round:'J1',home:'Francia',             away:'Senegal',            homeG:null,awayG:null},
+  {id:50, group:'I',date:'17/06/2026',time:'00:00',round:'J1',home:'Iraq',                away:'Noruega',            homeG:null,awayG:null},
+  {id:51, group:'I',date:'22/06/2026',time:'23:00',round:'J2',home:'Francia',             away:'Iraq',               homeG:null,awayG:null},
+  {id:52, group:'I',date:'23/06/2026',time:'02:00',round:'J2',home:'Noruega',             away:'Senegal',            homeG:null,awayG:null},
+  {id:53, group:'I',date:'26/06/2026',time:'21:00',round:'J3',home:'Noruega',             away:'Francia',            homeG:null,awayG:null},
+  {id:54, group:'I',date:'26/06/2026',time:'21:00',round:'J3',home:'Senegal',             away:'Iraq',               homeG:null,awayG:null},
+  // ── GRUPO J ──────────────────────────────────────────────────────
+  {id:55, group:'J',date:'17/06/2026',time:'03:00',round:'J1',home:'Argentina',           away:'Argelia',            homeG:null,awayG:null},
+  {id:56, group:'J',date:'17/06/2026',time:'06:00',round:'J1',home:'Austria',             away:'Jordania',           homeG:null,awayG:null},
+  {id:57, group:'J',date:'22/06/2026',time:'19:00',round:'J2',home:'Argentina',           away:'Austria',            homeG:null,awayG:null},
+  {id:58, group:'J',date:'23/06/2026',time:'05:00',round:'J2',home:'Jordania',            away:'Argelia',            homeG:null,awayG:null},
+  {id:59, group:'J',date:'28/06/2026',time:'04:00',round:'J3',home:'Argelia',             away:'Austria',            homeG:null,awayG:null},
+  {id:60, group:'J',date:'28/06/2026',time:'04:00',round:'J3',home:'Jordania',            away:'Argentina',          homeG:null,awayG:null},
+  // ── GRUPO K ──────────────────────────────────────────────────────
+  {id:61, group:'K',date:'17/06/2026',time:'19:00',round:'J1',home:'Portugal',            away:'RD Congo',           homeG:null,awayG:null},
+  {id:62, group:'K',date:'18/06/2026',time:'04:00',round:'J1',home:'Uzbekistán',          away:'Colombia',           homeG:null,awayG:null},
+  {id:63, group:'K',date:'23/06/2026',time:'19:00',round:'J2',home:'Portugal',            away:'Uzbekistán',         homeG:null,awayG:null},
+  {id:64, group:'K',date:'24/06/2026',time:'04:00',round:'J2',home:'Colombia',            away:'RD Congo',           homeG:null,awayG:null},
+  {id:65, group:'K',date:'28/06/2026',time:'01:30',round:'J3',home:'Colombia',            away:'Portugal',           homeG:null,awayG:null},
+  {id:66, group:'K',date:'28/06/2026',time:'01:30',round:'J3',home:'RD Congo',            away:'Uzbekistán',         homeG:null,awayG:null},
+  // ── GRUPO L ──────────────────────────────────────────────────────
+  {id:67, group:'L',date:'17/06/2026',time:'22:00',round:'J1',home:'Inglaterra',          away:'Croacia',            homeG:null,awayG:null},
+  {id:68, group:'L',date:'18/06/2026',time:'01:00',round:'J1',home:'Ghana',               away:'Panamá',             homeG:null,awayG:null},
+  {id:69, group:'L',date:'23/06/2026',time:'22:00',round:'J2',home:'Inglaterra',          away:'Ghana',              homeG:null,awayG:null},
+  {id:70, group:'L',date:'24/06/2026',time:'01:00',round:'J2',home:'Panamá',              away:'Croacia',            homeG:null,awayG:null},
+  {id:71, group:'L',date:'27/06/2026',time:'23:00',round:'J3',home:'Panamá',              away:'Inglaterra',         homeG:null,awayG:null},
+  {id:72, group:'L',date:'27/06/2026',time:'23:00',round:'J3',home:'Croacia',             away:'Ghana',              homeG:null,awayG:null},
+].map(m=>({...m, phase:'groups'}));
+
+// Merge FULL_SCHEDULE into S.matches, preserving existing results
+function mergeSchedule(){
+  FULL_SCHEDULE.forEach(fsm=>{
+    const exists=S.matches.find(m=>m.home===fsm.home&&m.away===fsm.away);
+    if(!exists) S.matches.push({...fsm});
+    // If match exists but has no time/date from Excel import, fill it in
+    else if(!exists.time&&fsm.time){ exists.date=fsm.date; exists.time=fsm.time; exists.round=fsm.round; exists.group=fsm.group; }
+  });
+  // Sort by date then time
+  S.matches.sort((a,b)=>{
+    const da=a.date.split('/').reverse().join(''),db=b.date.split('/').reverse().join('');
+    if(da!==db) return da<db?-1:1;
+    return (a.time||'').localeCompare(b.time||'');
+  });
+  saveS();
+}
+
+// ── SEED DATA ──────────────────────────────────────────────────────
 function initSeedData() {
   if (S.participants.length > 0) return; // ya hay datos del Excel
   const p = (name, total, g) => ({
@@ -2162,10 +2279,7 @@ function initSeedData() {
   S.participants.sort((a,b) => b.totalPts - a.totalPts);
   S.participants.forEach((pl,i) => pl.pos = i+1);
 
-  S.matches = [
-    { id:1, group:'A', phase:'groups', date:'11/06/2026', time:'21:00',
-      round:'J1', home:'México', away:'Sudáfrica', homeG:2, awayG:0 },
-  ];
+  S.matches = [...FULL_SCHEDULE];
 
   S.predictions = {
     'México-Sudáfrica': [
@@ -2187,12 +2301,17 @@ function initSeedData() {
       { name:'Xavi Sarra',      pred:'1|2-1' },
     ]
   };
+  S.scoredMatches = { 'México-Sudáfrica': '1|2-0' };
   S.lastUpdated = '2026-06-11T23:00:00.000Z';
   saveS();
 }
 
 // ── INIT ───────────────────────────────────────────────────────────
-loadS(); initSeedData(); renderAll();
+loadS();
+initSeedData();
+// Auto-migrate existing installs that only have 1-2 matches
+if(S.participants.length>0 && S.matches.length<10) mergeSchedule();
+renderAll();
 </script>
 </body>
 </html>
