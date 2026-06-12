@@ -777,6 +777,13 @@
     }
     .ocr-add-row:hover { border-color:var(--gold); color:var(--gold); }
     .ocr-warn { font-size:.7rem; color:var(--gold); background:rgba(234,197,53,.08); border:1px solid rgba(234,197,53,.25); border-radius:4px; padding:3px 8px; display:inline-block; }
+    .import-tabs { display:flex; gap:4px; margin-bottom:0; border-bottom:1px solid var(--border); }
+    .import-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); padding:8px 14px; font-family:'Montserrat',sans-serif; font-size:.72rem; font-weight:700; cursor:pointer; letter-spacing:.5px; transition:color .15s,border-color .15s; margin-bottom:-1px; }
+    .import-tab.active { color:var(--gold); border-bottom-color:var(--gold); }
+    .import-tab:hover:not(.active) { color:var(--text); }
+    .paste-textarea { width:100%; min-height:140px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--r-sm); color:var(--text); font-family:'Courier New',monospace; font-size:.72rem; padding:10px 12px; resize:vertical; outline:none; box-sizing:border-box; }
+    .paste-textarea:focus { border-color:var(--gold); }
+    .paste-textarea::placeholder { color:var(--muted); opacity:.6; }
 
     /* ══════════════════════════════════════════
        NAV TRANSITION
@@ -1356,17 +1363,32 @@ function renderAdmin() {
   const upd=S.lastUpdated?new Date(S.lastUpdated).toLocaleString('es-ES'):'Nunca';
   wrap.innerHTML=`
     <div class="card">
-      <div class="card-label" style="margin-bottom:6px">Subir captura de pantalla</div>
-      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Sube una foto del Excel con predicciones y resultado. Se extrae el texto automaticamente y se actualiza el tablero.</p>
-      <div class="drop-zone" id="ocr-dz" onclick="document.getElementById('ocr-fi').click()"
-           ondragover="dzOv2(event)" ondrop="dzDp2(event)" ondragleave="document.getElementById('ocr-dz').classList.remove('over')" style="padding:24px 16px">
-        <div class="drop-zone-icon">📸</div>
-        <div class="drop-zone-title">Arrastra la captura aqui o haz clic</div>
-        <div class="drop-zone-sub">JPG o PNG · se procesa en el navegador</div>
+      <div class="card-label" style="margin-bottom:6px">Importar predicciones del partido</div>
+
+      <div class="import-tabs" id="import-tabs">
+        <button class="import-tab active" onclick="switchImportTab('paste')">📋 Pegar desde Excel</button>
+        <button class="import-tab" onclick="switchImportTab('ocr')">📸 Subir foto (OCR)</button>
       </div>
-      <input type="file" id="ocr-fi" accept="image/*" style="display:none" onchange="onOcrFi(event)">
-      <div id="ocr-status"></div>
-      <div id="ocr-preview"></div>
+
+      <div id="import-paste-panel">
+        <p style="font-size:.78rem;color:var(--muted);margin:10px 0 8px">En el Excel selecciona las celdas con el partido (nombre + resultado + predicciones), pulsa <b>Ctrl+C</b> y pega abajo con <b>Ctrl+V</b>. Sin errores.</p>
+        <textarea id="paste-input" class="paste-textarea" placeholder="Pega aqui el contenido copiado del Excel (Ctrl+V)..." onpaste="setTimeout(()=>onPasteImport(),50)" oninput="onPasteImport()"></textarea>
+        <div id="paste-status"></div>
+        <div id="paste-preview"></div>
+      </div>
+
+      <div id="import-ocr-panel" style="display:none">
+        <p style="font-size:.78rem;color:var(--muted);margin:10px 0 8px">Sube una foto del Excel. El OCR puede cometer errores — revisa siempre los campos antes de confirmar.</p>
+        <div class="drop-zone" id="ocr-dz" onclick="document.getElementById('ocr-fi').click()"
+             ondragover="dzOv2(event)" ondrop="dzDp2(event)" ondragleave="document.getElementById('ocr-dz').classList.remove('over')" style="padding:24px 16px">
+          <div class="drop-zone-icon">📸</div>
+          <div class="drop-zone-title">Arrastra la captura aqui o haz clic</div>
+          <div class="drop-zone-sub">JPG o PNG · se procesa en el navegador</div>
+        </div>
+        <input type="file" id="ocr-fi" accept="image/*" style="display:none" onchange="onOcrFi(event)">
+        <div id="ocr-status"></div>
+        <div id="ocr-preview"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -1632,6 +1654,65 @@ function fuzzyName(raw){
   return best?best.name:null;
 }
 
+// ── Import tab switcher ─────────────────────────────────────────────
+function switchImportTab(mode){
+  document.querySelectorAll('.import-tab').forEach((t,i)=>{
+    t.classList.toggle('active', (i===0&&mode==='paste')||(i===1&&mode==='ocr'));
+  });
+  document.getElementById('import-paste-panel').style.display = mode==='paste'?'':'none';
+  document.getElementById('import-ocr-panel').style.display   = mode==='ocr'?'':'none';
+}
+
+// ── Paste-from-Excel parser ─────────────────────────────────────────
+function parsePasteData(raw){
+  const lines = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  const entries = [];
+  let matchName = '', matchResult = '';
+  const RESULT_PAR = /\(?([12X])\|(\d+)-(\d+)\)?/i;
+  const PRED_EXACT = /^([12X])\|(\d+)-(\d+)$/i;
+
+  for(const rawLine of lines){
+    const cols = rawLine.split('\t').map(c=>c.trim());
+
+    for(const col of cols){
+      // Result in parens: (1|2-1)
+      const rm = col.match(/\(([12X])\|(\d+)-(\d+)\)/i);
+      if(rm){ matchResult=`${rm[1].toUpperCase()}|${rm[2]}-${rm[3]}`; }
+      // Match name: non-empty col that isn't a prediction, not "Nombre", not a number
+      else if(col.length>3 && !/^\(/.test(col) && !/\|/.test(col) && !/^\d+$/.test(col)
+              && col.toLowerCase()!=='nombre' && !fuzzyName(col)){
+        if(!matchName) matchName=col;
+        else if(!matchName.includes(col.substring(0,6))) matchName+=' '+col;
+      }
+    }
+
+    // Player row: col[0]=name, col[1]=prediction
+    if(cols.length>=2){
+      const nameRaw=cols[0];
+      const predRaw=cols[1];
+      if(nameRaw && nameRaw.toLowerCase()!=='nombre'){
+        const name=fuzzyName(nameRaw);
+        const pm=predRaw?.match(PRED_EXACT);
+        if(name && pm && !entries.find(e=>e.name===name)){
+          entries.push({name, pred:`${pm[1].toUpperCase()}|${pm[2]}-${pm[3]}`});
+        }
+      }
+    }
+  }
+
+  return {matchName:matchName.trim(), matchResult, entries};
+}
+
+function onPasteImport(){
+  const raw = document.getElementById('paste-input')?.value||'';
+  const st  = document.getElementById('paste-status');
+  const pv  = document.getElementById('paste-preview');
+  if(!raw.trim()){ st.innerHTML=''; pv.innerHTML=''; return; }
+
+  const {matchName, matchResult, entries} = parsePasteData(raw);
+  showOCRPreview(matchName, matchResult, entries, pv, st);
+}
+
 // ── OCR text normalization ──────────────────────────────────────────
 function normOCR(s){
   return s
@@ -1732,8 +1813,14 @@ function parseOCRAndShow(text, container){
   showOCRPreview(matchName, matchResult, entries, container);
 }
 
+let _importContainerId = 'ocr-preview';
+let _importStatusId    = 'ocr-status';
+
 // ── Show editable preview ───────────────────────────────────────────
-function showOCRPreview(matchName, matchResult, entries, container){
+function showOCRPreview(matchName, matchResult, entries, container, statusEl){
+  _importContainerId = container.id || 'ocr-preview';
+  _importStatusId    = statusEl?.id || (container.id==='paste-preview'?'paste-status':'ocr-status');
+
   const imgHtml = container.querySelector('img') ? container.querySelector('img').outerHTML : '';
   const opts = S.participants.map(p=>`<option value="${p.name}">${p.name}</option>`).join('');
   const alreadyScored = matchResult && S.scoredMatches && S.scoredMatches[matchName];
@@ -1741,15 +1828,16 @@ function showOCRPreview(matchName, matchResult, entries, container){
   const found = entries.length;
   const missing = total - found;
   const isPointsMode = entries.length && entries[0].pts !== undefined;
+  const isPaste = container.id === 'paste-preview';
 
   // Status banner
   let banner;
   if(!found){
-    banner=`<div class="alert a-inf" style="margin-bottom:10px">OCR no detectó predicciones. Rellena las celdas vacías manualmente y confirma.</div>`;
+    banner=`<div class="alert a-inf" style="margin-bottom:10px">${isPaste?'No se detectaron predicciones en el texto pegado. Revisa el formato.':'No se detectaron predicciones. Rellena manualmente o sube otra captura.'}</div>`;
   } else if(missing>0){
-    banner=`<div class="alert a-inf" style="margin-bottom:10px">OCR pre-rellenó <b>${found}/${total}</b> predicciones <span style="color:#4ade80">(✓)</span>. Completa las marcadas con <b>?</b> y confirma.</div>`;
+    banner=`<div class="alert a-inf" style="margin-bottom:10px">Pre-rellenadas <b>${found}/${total}</b> predicciones <span style="color:#4ade80">(✓)</span>. Completa las marcadas con <b>?</b> y confirma.</div>`;
   } else {
-    banner=`<div class="alert a-ok" style="margin-bottom:10px">OCR detectó los ${found} jugadores correctamente. Revisa y confirma.</div>`;
+    banner=`<div class="alert a-ok" style="margin-bottom:10px">Los ${found} jugadores detectados correctamente. Revisa y confirma.</div>`;
   }
 
   if(alreadyScored){
@@ -1805,7 +1893,7 @@ function showOCRPreview(matchName, matchResult, entries, container){
     <button class="ocr-add-row" onclick="addOCRRow()">+ Añadir jugador</button>
     <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-gold" onclick="confirmOCRImport()">Guardar y actualizar tablero</button>
-      <button class="btn btn-ghost" onclick="document.getElementById('ocr-preview').innerHTML='';document.getElementById('ocr-status').innerHTML=''">Cancelar</button>
+      <button class="btn btn-ghost" onclick="cancelImport()">Cancelar</button>
     </div>`;
 }
 
@@ -1864,8 +1952,22 @@ function confirmOCRImport(){
 
   S.lastUpdated=new Date().toISOString();
   saveS();renderAll();renderAdmin();
-  document.getElementById('ocr-status').innerHTML=`<div class="alert a-ok">Guardado. Tablero actualizado con ${entries.length} predicciones.</div>`;
-  document.getElementById('ocr-preview').innerHTML='';
+  const stEl=document.getElementById(_importStatusId);
+  if(stEl) stEl.innerHTML=`<div class="alert a-ok">Guardado. Tablero actualizado con ${entries.length} predicciones.</div>`;
+  const pvEl=document.getElementById(_importContainerId);
+  if(pvEl) pvEl.innerHTML='';
+  // Clear paste textarea if that was the source
+  const ta=document.getElementById('paste-input');
+  if(ta) ta.value='';
+}
+
+function cancelImport(){
+  const pvEl=document.getElementById(_importContainerId);
+  const stEl=document.getElementById(_importStatusId);
+  if(pvEl) pvEl.innerHTML='';
+  if(stEl) stEl.innerHTML='';
+  const ta=document.getElementById('paste-input');
+  if(ta) ta.value='';
 }
 
 function applyMatchPoints(matchName, result){
