@@ -1628,83 +1628,95 @@ function fuzzyName(raw){
   return best?best.name:null;
 }
 
-// ── Parse OCR text ──────────────────────────────────────────────────
+// ── OCR text normalization ──────────────────────────────────────────
 function normOCR(s){
   return s
-    // Fix | misread as l, I, / between sign and digits: "1l3" → "1|3"
-    .replace(/([1X2xI])([lI\/\\])(\d)/gi, (_,sign,__,d)=>`${sign.toUpperCase()}|${d}`)
-    // Fix hyphen variants in score
+    .replace(/([1X2xI])([lI\/\\])(\d)/gi,(_,sign,__,d)=>`${sign.toUpperCase()}|${d}`)
     .replace(/(\d)[—–](\d)/g,'$1-$2')
-    // Collapse spaces
     .replace(/\s+/,' ')
     .trim();
 }
 
+// Is this line structural noise we should skip?
+function isNoiseLine(line){
+  return /pegar\s+valores|^nombre$|^pos$|puntos.{0,25}d[ií]a|d[ií]a\s+seleccionado|eliminatoria/i.test(line);
+}
+
+// Does line look like it contains a player name only (no digits/prediction)?
+function looksLikeName(line){
+  return line.length>=2 && !/[|]/.test(line) && !/^\d+$/.test(line);
+}
+
 function parseOCRAndShow(text, container){
   const rawLines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>1);
+  const lines    = rawLines.map(normOCR);
+  const PRED_RX  = /([1X2])\|(\d+)-(\d+)/;
+  const RES_RX   = /[\(\[]([1X2])\|(\d+)-(\d+)[\)\]]/;
 
-  let matchName='', matchResult=null;
+  // ── PASS 1: find result and match name ─────────────────────────
+  let matchResult = null;
+  let resultLineIdx = -1;
+
+  for(let i=0;i<lines.length;i++){
+    const m = lines[i].match(RES_RX);
+    if(m){ matchResult=`${m[1]}|${m[2]}-${m[3]}`; resultLineIdx=i; break; }
+  }
+
+  // Build match name from lines ABOVE the result line (up to 3 lines back)
+  let matchName = '';
+  if(resultLineIdx>=0){
+    const nameParts=[];
+    for(let j=resultLineIdx-1; j>=Math.max(0,resultLineIdx-3); j--){
+      const l=lines[j];
+      if(isNoiseLine(l)) break;
+      if(l.length>2 && !/\d/.test(l)) nameParts.unshift(l);
+    }
+    // Also check if result line itself has a name before the parenthesis
+    const beforeParen = lines[resultLineIdx].replace(RES_RX,'').trim();
+    if(beforeParen.length>2 && !/\d/.test(beforeParen)) nameParts.unshift(beforeParen);
+    matchName = nameParts.join(' ').replace(/\s*-\s*/g,'-').trim();
+  }
+
+  // ── PASS 2: extract predictions ────────────────────────────────
   const entries=[];
   const seen=new Set();
+  const isPointsMode = lines.join(' ').match(/puntos.{0,25}d[ií]a|puntos.{0,25}elimin/i);
 
-  // Detect screenshot type: points view has "Puntos" in the header
-  const allText = rawLines.join(' ');
-  const isPointsMode = /puntos.{0,20}d[ií]a|puntos.{0,20}elimin/i.test(allText);
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(isNoiseLine(line)) continue;
 
-  for(const raw of rawLines){
-    const line = normOCR(raw);
+    const pm = line.match(PRED_RX);
 
-    // ── Skip structural noise ──────────────────────────────────────
-    if(/pegar|valores|^nombre$|^pos$/i.test(line)) continue;
-    if(/puntos.{0,20}d[ií]a|puntos.{0,20}elimin|d[ií]a seleccionado/i.test(line)) continue;
+    if(pm && !isPointsMode){
+      const pred=`${pm[1]}|${pm[2]}-${pm[3]}`;
+      const predIdx = line.indexOf(pred);
 
-    // ── Detect match name + result ─────────────────────────────────
-    // Formats: "México-Sudáfrica (1|2-0)"  /  "México-Sudáfrica"  /  column header
-    if(!matchResult){
-      // With result embedded: "TeamA-TeamB (1|2-0)" or "TeamA-TeamB 1|2-0"
-      const withRes = line.match(/([A-ZÁÉÍÓÚa-záéíóúñü][A-ZÁÉÍÓÚa-záéíóúñü\s\.]{1,20}?)\s*[-–]\s*([A-ZÁÉÍÓÚa-záéíóúñü][A-ZÁÉÍÓÚa-záéíóúñü\s\.]{1,20}?)\s*[\(\[]?\s*([1X2])\|(\d+)-(\d+)/);
-      if(withRes){
-        matchName=`${withRes[1].trim()}-${withRes[2].trim()}`;
-        matchResult=`${withRes[3]}|${withRes[4]}-${withRes[5]}`;
-        continue;
+      // Name candidate: text before prediction on this line
+      let namePart = line.substring(0,predIdx).replace(/^\d+\s+/,'').trim();
+
+      // If empty (prediction is at start of line), look at previous non-noise line
+      if(!namePart){
+        for(let j=i-1;j>=Math.max(0,i-2);j--){
+          const prev=lines[j];
+          if(!isNoiseLine(prev) && looksLikeName(prev)){
+            namePart=prev.replace(/^\d+\s+/,'').trim();
+            break;
+          }
+        }
       }
-      // Just match name without result yet
-      const nameOnly = line.match(/^([A-ZÁÉÍÓÚa-záéíóúñü][A-ZÁÉÍÓÚa-záéíóúñü\s\.]{1,20}?)\s*[-–]\s*([A-ZÁÉÍÓÚa-záéíóúñü][A-ZÁÉÍÓÚa-záéíóúñü\s\.]{1,20}?)\s*$/);
-      if(nameOnly && !matchName){
-        matchName=`${nameOnly[1].trim()}-${nameOnly[2].trim()}`;
-        continue;
-      }
+
+      const name = fuzzyName(namePart);
+      if(name && !seen.has(name)){ seen.add(name); entries.push({name,pred}); }
     }
 
-    // ── PREDICTIONS MODE: "Nacho 1|3-1" ───────────────────────────
-    if(!isPointsMode){
-      const pm = line.match(/([1X2])\|(\d+)-(\d+)/);
-      if(pm){
-        const pred=`${pm[1]}|${pm[2]}-${pm[3]}`;
-        // Extract name: everything before the prediction in the NORMALIZED line
-        const predIdx = line.indexOf(pred);
-        const namePart = line.substring(0, predIdx)
-          .replace(/^\d+\s+/,'')   // strip leading position number
-          .trim();
-        const name = fuzzyName(namePart);
-        if(name && !seen.has(name)){ seen.add(name); entries.push({name,pred}); }
-      }
-    }
-
-    // ── POINTS MODE: "1 Xavi Riu 5 5 -" ──────────────────────────
+    // Points mode: "1 Xavi Riu 5 5 -" — extract name + match pts (col 4)
     if(isPointsMode){
-      // Also look for result in this mode (it's in the column header)
-      if(!matchResult){
-        const colRes = line.match(/([1X2])\|(\d+)-(\d+)/);
-        if(colRes){ matchResult=`${colRes[1]}|${colRes[2]}-${colRes[3]}`; continue; }
-      }
-      // Row: optional_pos  name  total_pts  match_pts  (dash)
-      const rowM = line.match(/^(\d+)?\s*(.{3,30}?)\s{2,}(\d+)\s+(\d+)\s*[-–]?\s*$/);
+      const rowM = line.match(/^(\d+)?\s+(.{3,28}?)\s{2,}(\d+)\s+(\d+)/);
       if(rowM){
-        const nameRaw = rowM[2].trim();
-        const matchPts = parseInt(rowM[4],10); // column 4 = points for this specific match
-        const name = fuzzyName(nameRaw);
-        if(name && !seen.has(name)){ seen.add(name); entries.push({name, pred:'', pts:matchPts}); }
+        const name=fuzzyName(rowM[2].trim());
+        const pts=parseInt(rowM[4],10);
+        if(name && !seen.has(name)){ seen.add(name); entries.push({name,pred:'',pts}); }
       }
     }
   }
@@ -1814,11 +1826,25 @@ function confirmOCRImport(){
   if(matchResult&&/^[1X2]\|\d+-\d+$/.test(matchResult)){
     const[,scoreStr]=matchResult.split('|');
     const[hg,ag]=scoreStr.split('-').map(Number);
-    const nameQ=matchName.split(/[-–]\s*/)[0].toLowerCase().trim().substring(0,5);
-    const m=S.matches.find(m=>m.home.toLowerCase().startsWith(nameQ)||
-      matchName.toLowerCase().includes(m.home.toLowerCase().substring(0,4)));
-    if(m){m.homeG=hg;m.awayG=ag;}
-    // Apply points (removes old scored points for this match first if re-scoring)
+    // Find existing match by home team name (first token before dash)
+    const homeQ=matchName.split(/\s*[-–]\s*/)[0].toLowerCase().trim();
+    let m=S.matches.find(m=>
+      m.home.toLowerCase().includes(homeQ.substring(0,5))||
+      homeQ.includes(m.home.toLowerCase().substring(0,5))
+    );
+    if(m){
+      m.homeG=hg; m.awayG=ag;
+    } else {
+      // Add match if not in list yet (not loaded from Excel)
+      const parts=matchName.split(/\s*[-–]\s*/);
+      S.matches.push({
+        id:S.matches.length+1, group:'?', phase:'groups',
+        date:new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}),
+        time:'', round:'',
+        home:parts[0]||matchName, away:parts.slice(1).join('-')||'?',
+        homeG:hg, awayG:ag
+      });
+    }
     applyMatchPoints(matchName,matchResult);
   }
 
