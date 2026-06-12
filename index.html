@@ -427,6 +427,9 @@
     .mcard:active { transform: scale(.99); }
     .mcard.today { border-color: rgba(234,197,53,.45); background: rgba(234,197,53,.04); }
     .mcard.played { border-left: 2px solid rgba(39,174,96,.5); }
+    .mcard.finished { border-left: 2px solid var(--gold); }
+    .fin-badge { background:rgba(234,197,53,.15); color:var(--gold); font-size:.55rem; font-weight:800; letter-spacing:1px; padding:1px 5px; border-radius:3px; border:1px solid rgba(234,197,53,.3); }
+    .mscore-num.scored { color:#4ade80; }
     .mcard-date {
       font-size: 0.66rem;
       font-weight: 600;
@@ -784,6 +787,10 @@
     .paste-textarea { width:100%; min-height:140px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--r-sm); color:var(--text); font-family:'Courier New',monospace; font-size:.72rem; padding:10px 12px; resize:vertical; outline:none; box-sizing:border-box; }
     .paste-textarea:focus { border-color:var(--gold); }
     .paste-textarea::placeholder { color:var(--muted); opacity:.6; }
+    .live-score-row { display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--r-sm); padding:14px 16px; }
+    .live-team { font-size:.75rem; font-weight:800; text-transform:uppercase; letter-spacing:.5px; flex:1; text-align:center; color:var(--text); }
+    .live-g-input { width:52px; text-align:center; font-size:2rem; font-weight:900; background:var(--surface); border:2px solid var(--border); border-radius:var(--r-sm); color:var(--gold); padding:6px 0; font-family:'Montserrat',sans-serif; outline:none; }
+    .live-g-input:focus { border-color:var(--gold); }
 
     /* ══════════════════════════════════════════
        NAV TRANSITION
@@ -1068,13 +1075,17 @@ function mCard(m) {
   const played=m.homeG!==null&&m.awayG!==null;
   const today=isToday(m.date);
   const sub=m.phase==='groups'?`Grupo ${m.group} · ${m.round}`:PLBL[m.phase];
-  let cls='mcard'; if(today) cls+=' today'; if(played) cls+=' played';
+  const key=`${m.home}-${m.away}`;
+  const scored=S.scoredMatches&&S.scoredMatches[key];
+  const isLive=today&&!scored;
+  let cls='mcard'; if(today) cls+=' today'; if(played) cls+=' played'; if(scored) cls+=' finished';
   return `<div class="${cls}">
     <div class="mcard-date">
       <span>${fmtDate(m.date)}</span>
       <span style="color:var(--border)">·</span>
-      <span>${m.time}</span>
-      ${today?'<span class="live-dot">LIVE</span>':''}
+      <span>${m.time||''}</span>
+      ${isLive?'<span class="live-dot">EN VIVO</span>':''}
+      ${scored?'<span class="fin-badge">FIN</span>':''}
     </div>
     <div class="mcard-teams">
       <div class="mteam">
@@ -1083,7 +1094,7 @@ function mCard(m) {
       </div>
       <div class="mscore-box">
         ${played
-          ?`<div class="mscore-num">${m.homeG}<span class="mscore-sep">-</span>${m.awayG}</div>`
+          ?`<div class="mscore-num ${scored?'scored':''}">${m.homeG}<span class="mscore-sep">-</span>${m.awayG}</div>`
           :'<div class="mscore-vs">VS</div>'}
         <div class="mscore-phase">${sub}</div>
       </div>
@@ -1412,6 +1423,33 @@ function renderAdmin() {
         </div>
         <button class="btn btn-red" style="margin-top:8px" onclick="clearData()">Borrar todos los datos</button>
       </div>`:''}</div>
+    ${Object.keys(S.predictions).length ? `<div class="card" id="live-card">
+      <div class="card-label" style="margin-bottom:6px">Marcador en vivo</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px">Selecciona un partido y actualiza el marcador mientras lo ves. La clasificacion se recalcula al instante.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+        <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
+          <span style="font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Partido</span>
+          <select id="live-match-sel" class="ocr-name-sel" style="width:100%" onchange="onLiveMatchChange()">
+            ${Object.keys(S.predictions).map(k=>`<option value="${k}">${k}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="live-score-row" id="live-score-row">
+        <div class="live-team" id="live-home-name"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="number" id="live-home-g" class="live-g-input" min="0" max="20" value="0" oninput="previewLiveScore()">
+          <span style="font-size:1.4rem;font-weight:900;color:var(--muted2)">-</span>
+          <input type="number" id="live-away-g" class="live-g-input" min="0" max="20" value="0" oninput="previewLiveScore()">
+        </div>
+        <div class="live-team" id="live-away-name"></div>
+      </div>
+      <div id="live-score-preview" style="margin:10px 0 12px;font-size:.72rem;color:var(--muted);min-height:18px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-gold" onclick="updateLiveScore(false)">Actualizar clasificacion</button>
+        <button class="btn" style="background:rgba(74,222,128,.15);color:#4ade80;border:1px solid rgba(74,222,128,.3)" onclick="updateLiveScore(true)">Marcar partido finalizado</button>
+      </div>
+      <div id="live-score-status" style="margin-top:10px"></div>
+    </div>` : ''}
     ${S.participants.length ? `<div class="card">
       <div class="card-label" style="margin-bottom:4px">Fotos de los jugadores</div>
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:4px">Toca a cada jugador para subir su foto. Se guardan en el navegador.</p>
@@ -1432,8 +1470,79 @@ function renderAdmin() {
 }
 
 function chkPwd(){
-  if(document.getElementById('pwd-in').value===ADMIN_PWD){adminOpen=true;renderAdmin();}
+  if(document.getElementById('pwd-in').value===ADMIN_PWD){adminOpen=true;renderAdmin();requestAnimationFrame(onLiveMatchChange);}
   else{document.getElementById('pwd-err').textContent='Contrasena incorrecta';document.getElementById('pwd-in').value='';}
+}
+
+// ── Live scoring ────────────────────────────────────────────────────
+function onLiveMatchChange(){
+  const sel=document.getElementById('live-match-sel');
+  if(!sel) return;
+  const key=sel.value;
+  // Try to find the match in S.matches for team names
+  const parts=key.split(/\s*-\s*/);
+  const home=parts[0]||key;
+  const away=parts.slice(1).join('-')||'';
+  const hn=document.getElementById('live-home-name');
+  const an=document.getElementById('live-away-name');
+  if(hn) hn.textContent=home;
+  if(an) an.textContent=away;
+  // Pre-fill with existing scored result if any
+  const existing=S.scoredMatches&&S.scoredMatches[key];
+  if(existing){
+    const scoreStr=existing.split('|')[1]||'0-0';
+    const [hg,ag]=scoreStr.split('-').map(Number);
+    const hIn=document.getElementById('live-home-g');
+    const aIn=document.getElementById('live-away-g');
+    if(hIn) hIn.value=isNaN(hg)?0:hg;
+    if(aIn) aIn.value=isNaN(ag)?0:ag;
+  }
+  previewLiveScore();
+}
+
+function previewLiveScore(){
+  const hg=parseInt(document.getElementById('live-home-g')?.value,10)||0;
+  const ag=parseInt(document.getElementById('live-away-g')?.value,10)||0;
+  const sign=hg>ag?'1':hg===ag?'X':'2';
+  const signLabel=sign==='1'?'Victoria local':sign==='X'?'Empate':'Victoria visitante';
+  const pv=document.getElementById('live-score-preview');
+  if(pv) pv.innerHTML=`Resultado: <b style="color:var(--gold)">${sign}|${hg}-${ag}</b> <span style="opacity:.6">(${signLabel})</span>`;
+}
+
+function updateLiveScore(finish){
+  const sel=document.getElementById('live-match-sel');
+  if(!sel) return;
+  const key=sel.value;
+  const hg=parseInt(document.getElementById('live-home-g')?.value,10);
+  const ag=parseInt(document.getElementById('live-away-g')?.value,10);
+  if(isNaN(hg)||isNaN(ag)){alert('Introduce un marcador valido');return;}
+
+  const sign=hg>ag?'1':hg===ag?'X':'2';
+  const result=`${sign}|${hg}-${ag}`;
+
+  // Update match result in S.matches if the match exists there
+  const parts=key.split(/\s*-\s*/);
+  const hTeam=parts[0]||key;
+  const aTeam=parts.slice(1).join('-');
+  const mObj=S.matches.find(m=>m.home===hTeam&&m.away===aTeam);
+  if(mObj){ mObj.homeG=hg; mObj.awayG=ag; }
+  else {
+    // Add match if missing
+    S.matches.push({id:S.matches.length+1,group:'?',phase:'groups',
+      date:new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}),
+      time:'',round:'',home:hTeam,away:aTeam||'?',homeG:hg,awayG:ag});
+  }
+
+  if(!S.predictions[key]||!S.predictions[key].length){
+    alert('No hay predicciones guardadas para este partido. Importalas primero.');return;
+  }
+
+  applyMatchPoints(key, result);
+  S.lastUpdated=new Date().toISOString();
+  saveS(); renderAll();
+
+  const st=document.getElementById('live-score-status');
+  if(st) st.innerHTML=`<div class="alert a-ok">${finish?'Partido finalizado y':'Clasificacion actualizada con'} marcador <b>${hg}-${ag}</b>. ${S.predictions[key].length} predicciones recalculadas.</div>`;
 }
 function dzOv(e){e.preventDefault();document.getElementById('dz').classList.add('over');}
 function dzDp(e){e.preventDefault();document.getElementById('dz').classList.remove('over');const f=e.dataTransfer.files[0];if(f)procFile(f);}
@@ -2015,7 +2124,7 @@ function switchTab(name){
   document.querySelectorAll('.bn-item').forEach(b=>b.classList.remove('active'));
   const mb=document.querySelector(`.bn-item[data-tab="${name}"]`); if(mb) mb.classList.add('active');
 
-  if(name==='admin') renderAdmin();
+  if(name==='admin'){ renderAdmin(); requestAnimationFrame(onLiveMatchChange); }
   window.scrollTo(0,0);
 }
 
