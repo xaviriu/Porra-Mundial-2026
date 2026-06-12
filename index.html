@@ -1631,9 +1631,11 @@ function fuzzyName(raw){
 // ── OCR text normalization ──────────────────────────────────────────
 function normOCR(s){
   return s
-    .replace(/([1X2xI])([lI\/\\])(\d)/gi,(_,sign,__,d)=>`${sign.toUpperCase()}|${d}`)
+    // Fix | misread as adjacent character: l I / \ : ; !
+    .replace(/([12X])([lI\/\\:;!])(\d)/gi,(_,sign,__,d)=>`${sign.toUpperCase()}|${d}`)
+    // Fix hyphen variants in score
     .replace(/(\d)[—–](\d)/g,'$1-$2')
-    .replace(/\s+/,' ')
+    .replace(/\s+/g,' ')
     .trim();
 }
 
@@ -1650,8 +1652,10 @@ function looksLikeName(line){
 function parseOCRAndShow(text, container){
   const rawLines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>1);
   const lines    = rawLines.map(normOCR);
-  const PRED_RX  = /([1X2])\|(\d+)-(\d+)/;
-  const RES_RX   = /[\(\[]([1X2])\|(\d+)-(\d+)[\)\]]/;
+  // Separator between sign and score: | or any common OCR misread (l I / \ : ; !) or even a space
+  const PRED_RX  = /\b([12X])[\s|lI\/\\:;!](\d+)-(\d+)\b/i;
+  // Result in parentheses: same flexible separator
+  const RES_RX   = /[\(\[{]([12X])[\s|lI\/\\:;!](\d+)-(\d+)[\)\]}]/i;
 
   // ── PASS 1: find result and match name ─────────────────────────
   let matchResult = null;
@@ -1689,8 +1693,8 @@ function parseOCRAndShow(text, container){
     const pm = line.match(PRED_RX);
 
     if(pm && !isPointsMode){
-      const pred=`${pm[1]}|${pm[2]}-${pm[3]}`;
-      const predIdx = line.indexOf(pred);
+      const pred=`${pm[1].toUpperCase()}|${pm[2]}-${pm[3]}`;
+      const predIdx = line.search(PRED_RX); // use search() so it works regardless of OCR separator
 
       // Name candidate: text before prediction on this line
       let namePart = line.substring(0,predIdx).replace(/^\d+\s+/,'').trim();
