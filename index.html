@@ -742,6 +742,10 @@
     }
     .ocr-name-sel:focus, .ocr-pred-input:focus { border-color:var(--gold); }
     .ocr-pred-input { text-align:center; letter-spacing:.5px; max-width:80px; }
+    .ocr-pred-input.ocr-filled { border-color:rgba(74,222,128,.4); background:rgba(74,222,128,.06); }
+    .ocr-th-status { width:28px; }
+    .ocr-status-ok { color:#4ade80; font-size:.85rem; font-weight:700; }
+    .ocr-status-miss { color:var(--gold); font-size:.85rem; font-weight:700; opacity:.8; }
     .ocr-row-del {
       background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem;
       padding:2px 6px; border-radius:4px; transition:color .15s;
@@ -1741,11 +1745,11 @@ function showOCRPreview(matchName, matchResult, entries, container){
   // Status banner
   let banner;
   if(!found){
-    banner=`<div class="alert a-err" style="margin-bottom:10px">No se detectaron jugadores. Rellena manualmente o sube otra captura con mejor resolución.</div>`;
+    banner=`<div class="alert a-inf" style="margin-bottom:10px">OCR no detectó predicciones. Rellena las celdas vacías manualmente y confirma.</div>`;
   } else if(missing>0){
-    banner=`<div class="alert a-inf" style="margin-bottom:10px">Detectados <b>${found}/${total}</b> jugadores. Revisa y añade los que faltan manualmente.</div>`;
+    banner=`<div class="alert a-inf" style="margin-bottom:10px">OCR pre-rellenó <b>${found}/${total}</b> predicciones <span style="color:#4ade80">(✓)</span>. Completa las marcadas con <b>?</b> y confirma.</div>`;
   } else {
-    banner=`<div class="alert a-ok" style="margin-bottom:10px">Detectados los ${found} jugadores correctamente.</div>`;
+    banner=`<div class="alert a-ok" style="margin-bottom:10px">OCR detectó los ${found} jugadores correctamente. Revisa y confirma.</div>`;
   }
 
   if(alreadyScored){
@@ -1755,26 +1759,32 @@ function showOCRPreview(matchName, matchResult, entries, container){
   // Table columns depend on mode
   const thead = isPointsMode
     ? `<tr><th>Jugador</th><th>Pts partido</th><th></th></tr>`
-    : `<tr><th>Jugador</th><th>Predicción</th><th></th></tr>`;
+    : `<tr><th>Jugador</th><th>Predicción</th><th class="ocr-th-status"></th></tr>`;
 
-  const makeRow = (e) => {
-    const selHtml = opts.replace(`value="${e.name}"`, `value="${e.name}" selected`);
+  // Build lookup map from OCR entries
+  const ocrMap = {};
+  entries.forEach(e => { ocrMap[e.name] = e; });
+
+  // Always render ALL participants — OCR pre-fills what it detected
+  const allRows = S.participants.map(p => {
+    const e = ocrMap[p.name];
+    const selHtml = opts.replace(`value="${p.name}"`, `value="${p.name}" selected`);
     const valCol = isPointsMode
-      ? `<input class="ocr-pred-input" value="${e.pts??''}" maxlength="3" placeholder="0" style="max-width:60px">`
-      : `<input class="ocr-pred-input" value="${e.pred||''}" maxlength="7" placeholder="1|2-0">`;
+      ? `<input class="ocr-pred-input" value="${e?.pts??''}" maxlength="3" placeholder="0" style="max-width:60px">`
+      : `<input class="ocr-pred-input ${e?'ocr-filled':''}" value="${e?.pred||''}" maxlength="7" placeholder="1|2-0">`;
+    const statusIcon = !isPointsMode ? (e ? `<span class="ocr-status-ok" title="Detectado por OCR">✓</span>` : `<span class="ocr-status-miss" title="Rellena manualmente">?</span>`) : '';
     return `<tr class="ocr-entry-row">
       <td><select class="ocr-name-sel">${selHtml}</select></td>
       <td>${valCol}</td>
-      <td><button class="ocr-row-del" onclick="this.closest('tr').remove()">✕</button></td>
+      <td>${statusIcon}</td>
     </tr>`;
-  };
+  }).join('');
 
-  const rows = found
-    ? entries.map(makeRow).join('')
+  const rows = S.participants.length ? allRows
     : `<tr class="ocr-entry-row">
         <td><select class="ocr-name-sel">${opts}</select></td>
         <td><input class="ocr-pred-input" value="" maxlength="7" placeholder="${isPointsMode?'0':'1|2-0'}"></td>
-        <td><button class="ocr-row-del" onclick="this.closest('tr').remove()">✕</button></td>
+        <td></td>
       </tr>`;
 
   container.innerHTML=`
