@@ -1033,6 +1033,7 @@ const FB_CONFIG = {
   databaseURL: "https://porra-mundial-fe219-default-rtdb.firebaseio.com"
 };
 let _fbRef = null;
+let _fbWriteId = null; // ID de nuestra última escritura — para ignorar el echo propio
 
 function fbPayload() {
   return {
@@ -1066,13 +1067,15 @@ function initFirebase() {
     _fbRef.on('value', snapshot => {
       const data = snapshot.val();
       if(!data) {
-        // Firebase vacío → subir estado local actual
-        if(S.participants.length > 0) _fbRef.set(fbPayload()).catch(()=>{});
+        if(S.participants.length > 0) _fbRef.set({...fbPayload(), _wid: _fbWriteId}).catch(()=>{});
         return;
       }
+      // Si el _wid coincide con nuestra última escritura, es nuestro propio echo → ignorar
+      if(data._wid && data._wid === _fbWriteId) return;
+      // Cambio de otro cliente → aplicar y re-renderizar
       const localPhotos = S.photos || {};
       Object.assign(S, data);
-      S.photos = localPhotos; // fotos solo locales
+      S.photos = localPhotos;
       // Firebase elimina nulls — restaurar homeG/awayG como null en partidos sin resultado
       if(Array.isArray(S.matches)) {
         S.matches.forEach(m => {
@@ -1080,7 +1083,6 @@ function initFirebase() {
           if(m.awayG === undefined) m.awayG = null;
         });
       }
-      // Asegurar que todos los 72 partidos estén presentes (sin guardar a Firebase)
       mergeScheduleLocal();
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
       renderAll();
@@ -1096,10 +1098,11 @@ function loadS() {
 }
 
 function saveS() {
-  // Guardar en localStorage (caché offline)
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
-  // Guardar en Firebase (sincroniza todos los clientes)
-  if(_fbRef) _fbRef.set(fbPayload()).catch(err => console.warn('Firebase save:', err));
+  // Generar ID único para esta escritura (evita que el echo Firebase sobreescriba estado local)
+  _fbWriteId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  const payload = {...fbPayload(), _wid: _fbWriteId};
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...payload, photos:S.photos})); } catch(e){}
+  if(_fbRef) _fbRef.set(payload).catch(err => console.warn('Firebase save:', err));
 }
 
 // ── FLAGS ──────────────────────────────────────────────────────────
