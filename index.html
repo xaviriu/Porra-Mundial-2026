@@ -1809,8 +1809,20 @@ function updateLiveScore(finish){
       time:'',round:'',home:hTeam,away:aTeam||'?',homeG:hg,awayG:ag});
   }
 
+  // Buscar predicciones: clave exacta o por equipo local
+  let predKey=key;
   if(!S.predictions[key]||!S.predictions[key].length){
+    const homeQ=key.split('-')[0].toLowerCase();
+    const alt=Object.keys(S.predictions).find(k=>k.toLowerCase().startsWith(homeQ.substring(0,5)));
+    if(alt) predKey=alt;
+  }
+  if(!S.predictions[predKey]||!S.predictions[predKey].length){
     alert('No hay predicciones guardadas para este partido. Importalas primero.');return;
+  }
+  // Normalizar la clave al formato canónico si era distinta
+  if(predKey!==key){
+    S.predictions[key]=S.predictions[predKey];
+    delete S.predictions[predKey];
   }
 
   applyMatchPoints(key, result);
@@ -2292,10 +2304,23 @@ function addOCRRow(){
   document.getElementById('ocr-tbody').appendChild(tr);
 }
 
+function canonicalMatchKey(rawName){
+  // Busca el partido en S.matches y devuelve la clave exacta "Home-Away"
+  const homeQ=rawName.split(/\s*[-–\s]\s*/)[0].toLowerCase().trim();
+  const m=S.matches.find(m=>
+    m.home.toLowerCase().includes(homeQ.substring(0,5))||
+    homeQ.includes(m.home.toLowerCase().substring(0,5))
+  );
+  return m ? `${m.home}-${m.away}` : rawName;
+}
+
 function confirmOCRImport(){
-  const matchName=document.getElementById('ocr-match-name').value.trim();
+  const rawName=document.getElementById('ocr-match-name').value.trim();
   const matchResult=document.getElementById('ocr-match-result').value.trim().toUpperCase();
-  if(!matchName){alert('Indica el nombre del partido');return;}
+  if(!rawName){alert('Indica el nombre del partido');return;}
+
+  // Normalizar clave al formato exacto del partido (Home-Away)
+  const matchName=canonicalMatchKey(rawName);
 
   // Read rows
   const rows=[...document.querySelectorAll('.ocr-entry-row')];
@@ -2306,15 +2331,14 @@ function confirmOCRImport(){
 
   if(!entries.length){alert('No hay predicciones validas (formato: 1|2-0)');return;}
 
-  // Save predictions
+  // Save predictions con clave canónica
   S.predictions[matchName]=entries;
 
   // Update match result in S.matches
   if(matchResult&&/^[1X2]\|\d+-\d+$/.test(matchResult)){
     const[,scoreStr]=matchResult.split('|');
     const[hg,ag]=scoreStr.split('-').map(Number);
-    // Find existing match by home team name (first token before dash)
-    const homeQ=matchName.split(/\s*[-–]\s*/)[0].toLowerCase().trim();
+    const homeQ=matchName.split('-')[0].toLowerCase().trim();
     let m=S.matches.find(m=>
       m.home.toLowerCase().includes(homeQ.substring(0,5))||
       homeQ.includes(m.home.toLowerCase().substring(0,5))
@@ -2322,8 +2346,7 @@ function confirmOCRImport(){
     if(m){
       m.homeG=hg; m.awayG=ag;
     } else {
-      // Add match if not in list yet (not loaded from Excel)
-      const parts=matchName.split(/\s*[-–]\s*/);
+      const parts=matchName.split('-');
       S.matches.push({
         id:S.matches.length+1, group:'?', phase:'groups',
         date:new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}),
