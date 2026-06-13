@@ -1663,7 +1663,12 @@ function renderAdmin() {
         <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
           <span style="font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Partido</span>
           <select id="live-match-sel" class="ocr-name-sel" style="width:100%" onchange="onLiveMatchChange()">
-            ${Object.keys(S.predictions).map(k=>`<option value="${k}">${k}</option>`).join('')}
+            ${S.matches.map(m=>{
+              const k=`${m.home}-${m.away}`;
+              const score=m.homeG!==null&&m.awayG!==null?` (${m.homeG}-${m.awayG})`:'';
+              const grp=m.group?` · G${m.group}`:'';
+              return `<option value="${k}">${m.home} - ${m.away}${score}${grp}</option>`;
+            }).join('')}
           </select>
         </label>
       </div>
