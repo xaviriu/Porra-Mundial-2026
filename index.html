@@ -1136,7 +1136,7 @@ function saveS() {
     photos:S.photos, scoredMatches:S.scoredMatches||{}, _prevPreds:S._prevPreds||{},
     lastUpdated:S.lastUpdated, prevPositions:S.prevPositions||{}, pointsHistory:S.pointsHistory||[], _wid:_fbWriteId
   })); } catch(e){}
-  if(_fbRef) _fbRef.set(payload).catch(err => console.warn('Firebase save:', err));
+  if(_fbRef) _fbRef.set({...fbPayload(), _wid: _fbWriteId}).catch(err => console.warn('Firebase save:', err));
 }
 
 // ── FLAGS ──────────────────────────────────────────────────────────
