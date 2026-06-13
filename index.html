@@ -1448,9 +1448,10 @@ let _clasChart = null;
 const CHART_COLORS = ['#EAC535','#27AE60','#E74C3C','#3498DB','#9B59B6','#F39C12','#1ABC9C','#E91E63','#00BCD4','#FF5722','#8BC34A','#F0E68C','#FF9800','#795548','#2196F3','#4CAF50'];
 
 function renderPointsChart(){
+  try {
   const wrap = document.getElementById('clas-chart-wrap');
   const history = S.pointsHistory || [];
-  if(!history.length || !S.participants.length){ wrap.style.display='none'; return; }
+  if(!history.length || !S.participants.length || typeof Chart==='undefined'){ if(wrap) wrap.style.display='none'; return; }
   wrap.style.display='block';
   const canvas = document.getElementById('clas-chart-canvas');
   if(_clasChart){ _clasChart.destroy(); _clasChart=null; }
@@ -1500,6 +1501,7 @@ function renderPointsChart(){
       }
     }
   });
+  } catch(e){ console.warn('Chart error:', e); }
 }
 
 // ── RENDER PARTIDOS ────────────────────────────────────────────────
@@ -2314,59 +2316,78 @@ function canonicalMatchKey(rawName){
   return m ? `${m.home}-${m.away}` : rawName;
 }
 
+function showToast(msg, duration=4000){
+  let t=document.getElementById('toast-global');
+  if(!t){ t=document.createElement('div'); t.id='toast-global'; t.style.cssText='position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#27AE60;color:#fff;padding:12px 20px;border-radius:10px;font-size:.82rem;font-weight:700;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.4);max-width:90vw;text-align:center'; document.body.appendChild(t); }
+  t.textContent=msg; t.style.display='block';
+  clearTimeout(t._to); t._to=setTimeout(()=>{ t.style.display='none'; }, duration);
+}
+
 function confirmOCRImport(){
-  const rawName=document.getElementById('ocr-match-name').value.trim();
-  const matchResult=document.getElementById('ocr-match-result').value.trim().toUpperCase();
-  if(!rawName){alert('Indica el nombre del partido');return;}
+  try {
+    const rawName=document.getElementById('ocr-match-name').value.trim();
+    const matchResult=document.getElementById('ocr-match-result').value.trim().toUpperCase();
+    if(!rawName){alert('Indica el nombre del partido');return;}
 
-  // Normalizar clave al formato exacto del partido (Home-Away)
-  const matchName=canonicalMatchKey(rawName);
+    // Garantizar que S.matches es array
+    if(!Array.isArray(S.matches)) S.matches=Object.values(S.matches||{});
 
-  // Read rows
-  const rows=[...document.querySelectorAll('.ocr-entry-row')];
-  const entries=rows.map(r=>({
-    name:r.querySelector('.ocr-name-sel').value,
-    pred:r.querySelector('.ocr-pred-input').value.trim().toUpperCase()
-  })).filter(e=>e.name&&e.pred&&/^[1X2]\|\d+-\d+$/.test(e.pred));
+    // Normalizar clave al formato exacto del partido (Home-Away)
+    const matchName=canonicalMatchKey(rawName);
 
-  if(!entries.length){alert('No hay predicciones validas (formato: 1|2-0)');return;}
+    // Leer predicciones del formulario
+    const rows=[...document.querySelectorAll('.ocr-entry-row')];
+    const entries=rows.map(r=>({
+      name:r.querySelector('.ocr-name-sel').value,
+      pred:r.querySelector('.ocr-pred-input').value.trim().toUpperCase()
+    })).filter(e=>e.name&&e.pred&&/^[1X2]\|\d+-\d+$/.test(e.pred));
 
-  // Save predictions con clave canónica
-  S.predictions[matchName]=entries;
-
-  // Update match result in S.matches
-  if(matchResult&&/^[1X2]\|\d+-\d+$/.test(matchResult)){
-    const[,scoreStr]=matchResult.split('|');
-    const[hg,ag]=scoreStr.split('-').map(Number);
-    const homeQ=matchName.split('-')[0].toLowerCase().trim();
-    let m=S.matches.find(m=>
-      m.home.toLowerCase().includes(homeQ.substring(0,5))||
-      homeQ.includes(m.home.toLowerCase().substring(0,5))
-    );
-    if(m){
-      m.homeG=hg; m.awayG=ag;
-    } else {
-      const parts=matchName.split('-');
-      S.matches.push({
-        id:S.matches.length+1, group:'?', phase:'groups',
-        date:new Date().toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit',year:'numeric'}),
-        time:'', round:'',
-        home:parts[0]||matchName, away:parts.slice(1).join('-')||'?',
-        homeG:hg, awayG:ag
-      });
+    if(!entries.length){
+      alert('No hay predicciones válidas. Asegúrate de que el formato es 1|2-0, X|1-1 o 2|0-1');
+      return;
     }
-    applyMatchPoints(matchName,matchResult);
-  }
 
-  S.lastUpdated=new Date().toISOString();
-  saveS();renderAll();renderAdmin();
-  const stEl=document.getElementById(_importStatusId);
-  if(stEl) stEl.innerHTML=`<div class="alert a-ok">Guardado. Tablero actualizado con ${entries.length} predicciones.</div>`;
-  const pvEl=document.getElementById(_importContainerId);
-  if(pvEl) pvEl.innerHTML='';
-  // Clear paste textarea if that was the source
-  const ta=document.getElementById('paste-input');
-  if(ta) ta.value='';
+    // Guardar predicciones
+    S.predictions[matchName]=entries;
+
+    // Aplicar resultado si está informado
+    const hasResult=matchResult&&/^[1X2]\|\d+-\d+$/.test(matchResult);
+    if(hasResult){
+      const[,scoreStr]=matchResult.split('|');
+      const[hg,ag]=scoreStr.split('-').map(Number);
+      const homeQ=matchName.split('-')[0].toLowerCase().trim();
+      const mObj=S.matches.find(m=>
+        m.home.toLowerCase().startsWith(homeQ.substring(0,5))||
+        homeQ.startsWith(m.home.toLowerCase().substring(0,5))
+      );
+      if(mObj){ mObj.homeG=hg; mObj.awayG=ag; }
+      applyMatchPoints(matchName,matchResult);
+    }
+
+    S.lastUpdated=new Date().toISOString();
+    saveS();
+
+    // Actualizar UI
+    try { renderAll(); } catch(e){ console.error('renderAll error:',e); }
+    try { renderAdmin(); } catch(e){ console.error('renderAdmin error:',e); }
+
+    // Limpiar formulario
+    const pvEl=document.getElementById(_importContainerId);
+    if(pvEl) pvEl.innerHTML='';
+    const ta=document.getElementById('paste-input');
+    if(ta) ta.value='';
+
+    // Mostrar mensaje de éxito y saltar a Clasificación
+    const msg=hasResult
+      ? `✓ ${entries.length} predicciones guardadas y clasificación actualizada con resultado ${matchResult}`
+      : `✓ ${entries.length} predicciones guardadas para ${matchName} (sin resultado aún)`;
+    showToast(msg);
+    switchTab('clasificacion');
+
+  } catch(err) {
+    alert('Error al guardar: '+err.message);
+    console.error('confirmOCRImport error:', err);
+  }
 }
 
 function cancelImport(){
