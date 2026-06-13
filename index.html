@@ -1726,6 +1726,11 @@ function renderAdmin() {
         <span style="font-size:.7rem;color:var(--muted)">${S.matches.filter(m=>m.phase==='groups').length} / 72 partidos cargados</span>
       </div>
     </div>
+    <div class="card" style="border:1px solid rgba(231,76,60,.3)">
+      <div class="card-label" style="color:var(--red)">Zona peligrosa</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px">Resetea todos los puntos, predicciones e historial. Los participantes y el calendario se conservan. <b style="color:var(--text)">Irreversible.</b></p>
+      <button class="btn" style="background:rgba(231,76,60,.15);color:#E74C3C;border:1px solid rgba(231,76,60,.4);font-size:.78rem" onclick="resetAllData()">Resetear todo — empezar de cero</button>
+    </div>
     <div class="card">
       <div class="card-label">Como funciona</div>
       <ol class="instr">
@@ -2390,6 +2395,31 @@ function recordHistory(matchKey){
   const entry={key:matchKey, label, time:new Date().toISOString(), snapshot};
   if(idx>=0) S.pointsHistory[idx]=entry;
   else S.pointsHistory.push(entry);
+}
+
+function resetAllData(){
+  if(!confirm('¿Seguro? Esto borra TODOS los puntos, predicciones e historial. Los participantes y el calendario se conservan.')) return;
+  // Resetear puntos de todos los participantes
+  S.participants.forEach(p=>{
+    p.totalPts=0; p.gPts=0; p.gPosPts=0;
+    p.eq16=0; p.pt16=0; p.eq8=0; p.pt8=0;
+    p.eq4=0; p.pt4=0; p.eq2=0; p.pt2=0;
+    p.eq34=0; p.pt34=0; p.eqF=0; p.ptF=0; p.honor=0;
+  });
+  S.participants.sort((a,b)=>b.totalPts-a.totalPts);
+  S.participants.forEach((p,i)=>p.pos=i+1);
+  // Limpiar todos los resultados y quitar resultados de los partidos
+  S.predictions={};
+  S.scoredMatches={};
+  S._prevPreds={};
+  S.prevPositions={};
+  S.pointsHistory=[];
+  // Quitar resultados de los partidos (volver a sin resultado)
+  S.matches.forEach(m=>{ m.homeG=null; m.awayG=null; });
+  S.lastUpdated=new Date().toISOString();
+  saveS();
+  renderAll();
+  alert('Datos reseteados. Ya puedes subir partido por partido.');
 }
 
 // ── RENDER ALL ─────────────────────────────────────────────────────
