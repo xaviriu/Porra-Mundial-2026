@@ -998,7 +998,11 @@ function startAutoSync(){
   if(_syncInterval) clearInterval(_syncInterval);
   const hasMatchesToday=S.matches.some(m=>isToday(m.date));
   const interval=hasMatchesToday?60*1000:3*60*1000; // 1min today, 3min otherwise
-  _syncInterval=setInterval(()=>{ if(_autoSyncEnabled) syncScores(true); },interval);
+  _syncInterval=setInterval(()=>{
+    if(_autoSyncEnabled) syncScores(true);
+    // Re-render match cards every minute so EN VIVO appears/disappears in real time
+    renderPartidos(); renderInicio();
+  }, 60*1000);
   syncScores(true);
 }
 function stopAutoSync(){ clearInterval(_syncInterval); _syncInterval=null; }
@@ -1073,6 +1077,17 @@ function fmtDate(v) {
 const _today=()=>{ const t=new Date(); t.setHours(0,0,0,0); return t; };
 function isToday(v) { const d=parseDate(v); if(!d) return false; d.setHours(0,0,0,0); return d.getTime()===_today().getTime(); }
 function isPast(v) { const d=parseDate(v); if(!d) return false; d.setHours(0,0,0,0); return d<_today(); }
+// True only when current time is within kickoff → kickoff + 115 min
+function isMatchLive(m) {
+  if (!isToday(m.date)) return false;
+  if (m.homeG !== null && m.awayG !== null) return false;
+  if (!m.time || m.time === '?') return false;
+  const [h, min] = m.time.split(':').map(Number);
+  if (isNaN(h) || isNaN(min)) return false;
+  const now = Date.now();
+  const ko = new Date(); ko.setHours(h, min, 0, 0);
+  return now >= ko.getTime() && now <= ko.getTime() + 115*60*1000;
+}
 function isTomorrow(v) {
   const d=parseDate(v); if(!d) return false;
   const t=new Date(_today()); t.setDate(t.getDate()+1); d.setHours(0,0,0,0);
@@ -1156,8 +1171,8 @@ function mCard(m) {
   const sub=m.phase==='groups'?`Grupo ${m.group} · ${m.round}`:PLBL[m.phase];
   const key=`${m.home}-${m.away}`;
   const scored=S.scoredMatches&&S.scoredMatches[key];
-  const isLive=today&&!scored;
-  let cls='mcard'; if(today) cls+=' today'; if(played) cls+=' played'; if(scored) cls+=' finished';
+  const isLive=isMatchLive(m);
+  let cls='mcard'; if(today) cls+=' today'; if(played) cls+=' played'; if(scored) cls+=' finished'; if(isLive) cls+=' live';
   return `<div class="${cls}">
     <div class="mcard-date">
       <span>${fmtDate(m.date)}</span>
@@ -1485,27 +1500,15 @@ function renderAdmin() {
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-label">Subir Excel actualizado</div>
-      ${S.lastUpdated?`<div class="alert a-inf">Ultimo Excel cargado: <b>${upd}</b></div>`:''}
-      <div class="drop-zone" id="dz" onclick="document.getElementById('fi').click()"
-           ondragover="dzOv(event)" ondrop="dzDp(event)" ondragleave="document.getElementById('dz').classList.remove('over')">
-        <div class="drop-zone-icon">📊</div>
-        <div class="drop-zone-title">Arrastra el Excel aqui o haz clic para seleccionar</div>
-        <div class="drop-zone-sub">Archivo: <strong>ADMIN-Excel-Mundial-2026.xlsx</strong></div>
+    ${S.participants.length?`<div class="card">
+      <div class="card-label" style="margin-bottom:10px">Estado de los datos</div>
+      <div class="stat-row">
+        <div class="stat-box"><big style="color:var(--gold)">${S.participants.length}</big><span>participantes</span></div>
+        <div class="stat-box"><big style="color:#5DADE2">${S.matches.filter(m=>m.homeG!==null).length}</big><span>partidos con resultado</span></div>
+        <div class="stat-box"><big style="color:var(--green)">${Object.keys(S.predictions).length}</big><span>predicciones</span></div>
       </div>
-      <input type="file" id="fi" accept=".xlsx,.xls" style="display:none" onchange="onFi(event)">
-      <div id="up-st"></div>
-      <div id="up-pv"></div>
-      ${S.participants.length?`<div style="margin-top:18px;padding-top:18px;border-top:1px solid var(--border)">
-        <div class="card-label" style="margin-bottom:10px">Datos actuales</div>
-        <div class="stat-row">
-          <div class="stat-box"><big style="color:var(--gold)">${S.participants.length}</big><span>participantes</span></div>
-          <div class="stat-box"><big style="color:#5DADE2">${S.matches.length}</big><span>partidos</span></div>
-          <div class="stat-box"><big style="color:var(--green)">${Object.keys(S.predictions).length}</big><span>predicciones</span></div>
-        </div>
-        <button class="btn btn-red" style="margin-top:8px" onclick="clearData()">Borrar todos los datos</button>
-      </div>`:''}</div>
+      <button class="btn btn-red" style="margin-top:12px;font-size:.72rem" onclick="clearData()">Borrar todos los datos</button>
+    </div>`:''}
     ${Object.keys(S.predictions).length ? `<div class="card" id="live-card">
       <div class="card-label" style="margin-bottom:6px">Marcador en vivo</div>
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px">Selecciona un partido y actualiza el marcador mientras lo ves. La clasificacion se recalcula al instante.</p>
