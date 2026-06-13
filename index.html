@@ -817,6 +817,7 @@
     </div>
     <div class="nav-right">
       <div class="nav-badge" id="upd-desktop">Sin datos</div>
+      <div id="sync-badge" style="font-size:.6rem;color:var(--muted);opacity:.6;letter-spacing:.3px"></div>
       <button class="nav-admin-btn" data-tab="admin" onclick="switchTab('admin')">Admin</button>
     </div>
   </div>
@@ -923,6 +924,84 @@ const ADMIN_PWD   = 'cooidi2026';
 
 let S = { participants:[], matches:[], predictions:{}, photos:{}, scoredMatches:{}, lastUpdated:null };
 let adminOpen = false;
+
+// ── AUTO-SYNC (openfootball/worldcup.json — CORS-free, no key) ─────
+const SYNC_URL = 'https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json';
+const API_TEAM_MAP = {
+  'Mexico':'México','South Africa':'Sudáfrica','South Korea':'Corea del Sur',
+  'Czech Republic':'República Checa','Czechia':'República Checa',
+  'Canada':'Canadá','Bosnia and Herzegovina':'Bosnia y Herzegovina',
+  'Bosnia & Herzegovina':'Bosnia y Herzegovina',
+  'Qatar':'Catar','Switzerland':'Suiza',
+  'USA':'Estados Unidos','United States':'Estados Unidos',
+  'Paraguay':'Paraguay','Australia':'Australia',
+  'Turkey':'Turquía','Türkiye':'Turquía',
+  'Brazil':'Brasil','Morocco':'Marruecos','Haiti':'Haití','Scotland':'Escocia',
+  'Germany':'Alemania','Curacao':'Curazao','Curaçao':'Curazao',
+  'Ivory Coast':'Costa de Marfil',"Côte d'Ivoire":'Costa de Marfil',
+  'Ecuador':'Ecuador','Netherlands':'Países Bajos','Japan':'Japón',
+  'Sweden':'Suecia','Tunisia':'Túnez','Spain':'España','Cape Verde':'Cabo Verde',
+  'Belgium':'Bélgica','Egypt':'Egipto','Saudi Arabia':'Arabia Saudita',
+  'Uruguay':'Uruguay','Iran':'Irán','New Zealand':'Nueva Zelanda',
+  'France':'Francia','Senegal':'Senegal','Iraq':'Iraq','Norway':'Noruega',
+  'Argentina':'Argentina','Algeria':'Argelia','Austria':'Austria','Jordan':'Jordania',
+  'Portugal':'Portugal','DR Congo':'RD Congo','Congo DR':'RD Congo',
+  'Uzbekistan':'Uzbekistán','Colombia':'Colombia',
+  'England':'Inglaterra','Croatia':'Croacia','Ghana':'Ghana','Panama':'Panamá',
+};
+let _lastSync = null;
+let _syncInterval = null;
+let _autoSyncEnabled = true;
+
+async function syncScores(silent=false){
+  const statusEl = document.getElementById('sync-status');
+  if(!silent && statusEl) statusEl.innerHTML='<span style="color:var(--muted);font-size:.72rem">Sincronizando...</span>';
+  try{
+    const resp = await fetch(SYNC_URL+'?t='+Date.now());
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    const data = await resp.json();
+
+    let updated=0;
+    const allMatches=(data.rounds||[]).flatMap(r=>r.matches||[]);
+
+    for(const am of allMatches){
+      if(!am.score||!am.score.ft) continue;
+      const [hg,ag]=am.score.ft;
+      const home=API_TEAM_MAP[am.team1]||am.team1;
+      const away=API_TEAM_MAP[am.team2]||am.team2;
+      const mObj=S.matches.find(m=>m.home===home&&m.away===away);
+      if(!mObj) continue;
+      if(mObj.homeG===hg&&mObj.awayG===ag) continue;
+      mObj.homeG=hg; mObj.awayG=ag; updated++;
+      const key=`${home}-${away}`;
+      if(S.predictions[key]&&S.predictions[key].length){
+        const sign=hg>ag?'1':hg===ag?'X':'2';
+        applyMatchPoints(key,`${sign}|${hg}-${ag}`);
+      }
+    }
+
+    _lastSync=new Date();
+    if(updated>0){ S.lastUpdated=_lastSync.toISOString(); saveS(); renderAll(); }
+
+    const ts=_lastSync.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+    const msg=updated>0?`✓ ${ts} · <b style="color:#4ade80">${updated} resultado${updated>1?'s':''} nuevo${updated>1?'s':''}</b>`:`✓ ${ts} · Sin cambios`;
+    if(statusEl) statusEl.innerHTML=`<span style="font-size:.72rem;color:var(--muted)">${msg}</span>`;
+    // Update header badge
+    const hb=document.getElementById('sync-badge');
+    if(hb) hb.textContent='Sync '+ts;
+  }catch(err){
+    if(statusEl) statusEl.innerHTML=`<span style="font-size:.72rem;color:var(--red)">Sin conexión · ${err.message}</span>`;
+  }
+}
+
+function startAutoSync(){
+  if(_syncInterval) clearInterval(_syncInterval);
+  const hasMatchesToday=S.matches.some(m=>isToday(m.date));
+  const interval=hasMatchesToday?60*1000:3*60*1000; // 1min today, 3min otherwise
+  _syncInterval=setInterval(()=>{ if(_autoSyncEnabled) syncScores(true); },interval);
+  syncScores(true);
+}
+function stopAutoSync(){ clearInterval(_syncInterval); _syncInterval=null; }
 
 function loadS() {
   try { const r=localStorage.getItem(STORAGE_KEY); if(r) Object.assign(S,JSON.parse(r)); } catch(e){}
@@ -1459,6 +1538,19 @@ function renderAdmin() {
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:4px">Toca a cada jugador para subir su foto. Se guardan en el navegador.</p>
       <div class="photo-grid" id="photo-grid-wrap"></div>
     </div>` : ''}
+    <div class="card">
+      <div class="card-label" style="margin-bottom:6px">Sincronización automática de resultados</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">La app descarga resultados automáticamente de <b>openfootball/worldcup.json</b> cada vez que acaba un partido (sin API key, sin coste). La clasificación se actualiza sola.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <button class="btn btn-gold" style="font-size:.75rem" onclick="syncScores(false)">Sincronizar ahora</button>
+        <label style="display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="auto-sync-chk" ${_autoSyncEnabled?'checked':''} onchange="_autoSyncEnabled=this.checked;this.checked?startAutoSync():stopAutoSync()">
+          Auto-sync cada ${S.matches.some(m=>isToday(m.date))?'1 min':'3 min'}
+        </label>
+      </div>
+      <div id="sync-status" style="min-height:20px"></div>
+      <p style="font-size:.68rem;color:var(--muted);margin-top:8px;opacity:.6">⚠️ Los resultados aparecen cuando los contribuidores del repo publican el partido (generalmente minutos u horas después). No es marcador gol a gol — usa "Marcador en vivo" para eso.</p>
+    </div>
     <div class="card">
       <div class="card-label" style="margin-bottom:6px">Calendario de partidos</div>
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Los 72 partidos de fase de grupos estan precargados con horarios en hora española (CET). Si algo falta o hay un cambio oficial, recarga.</p>
@@ -2312,6 +2404,8 @@ initSeedData();
 // Auto-migrate existing installs that only have 1-2 matches
 if(S.participants.length>0 && S.matches.length<10) mergeSchedule();
 renderAll();
+// Start auto-sync after a short delay so page renders first
+setTimeout(startAutoSync, 1500);
 </script>
 </body>
 </html>
