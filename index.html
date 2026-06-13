@@ -1073,6 +1073,15 @@ function initFirebase() {
       const localPhotos = S.photos || {};
       Object.assign(S, data);
       S.photos = localPhotos; // fotos solo locales
+      // Firebase elimina nulls — restaurar homeG/awayG como null en partidos sin resultado
+      if(Array.isArray(S.matches)) {
+        S.matches.forEach(m => {
+          if(m.homeG === undefined) m.homeG = null;
+          if(m.awayG === undefined) m.awayG = null;
+        });
+      }
+      // Asegurar que todos los 72 partidos estén presentes (sin guardar a Firebase)
+      mergeScheduleLocal();
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
       renderAll();
     });
@@ -2497,19 +2506,26 @@ const FULL_SCHEDULE = [
 ].map(m=>({...m, phase:'groups'}));
 
 // Merge FULL_SCHEDULE into S.matches, preserving existing results
-function mergeSchedule(){
+function mergeScheduleLocal(){
+  // Merge sin guardar a Firebase (evita bucle con el listener)
+  if(!Array.isArray(S.matches)) S.matches=[];
   FULL_SCHEDULE.forEach(fsm=>{
     const exists=S.matches.find(m=>m.home===fsm.home&&m.away===fsm.away);
     if(!exists) S.matches.push({...fsm});
-    // If match exists but has no time/date from Excel import, fill it in
-    else if(!exists.time&&fsm.time){ exists.date=fsm.date; exists.time=fsm.time; exists.round=fsm.round; exists.group=fsm.group; }
+    else {
+      if(!exists.time&&fsm.time){ exists.date=fsm.date; exists.time=fsm.time; exists.round=fsm.round; exists.group=fsm.group; }
+      if(exists.homeG===undefined) exists.homeG=null;
+      if(exists.awayG===undefined) exists.awayG=null;
+    }
   });
-  // Sort by date then time
   S.matches.sort((a,b)=>{
     const da=a.date.split('/').reverse().join(''),db=b.date.split('/').reverse().join('');
     if(da!==db) return da<db?-1:1;
     return (a.time||'').localeCompare(b.time||'');
   });
+}
+function mergeSchedule(){
+  mergeScheduleLocal();
   saveS();
 }
 
@@ -2575,8 +2591,8 @@ function initSeedData() {
 // ── INIT ───────────────────────────────────────────────────────────
 loadS();
 initSeedData();
-// Auto-migrate existing installs that only have 1-2 matches
-if(S.participants.length>0 && S.matches.length<10) mergeSchedule();
+// Siempre asegurar los 72 partidos y nulls correctos (sin escribir a Firebase)
+mergeScheduleLocal();
 // Backfill history: if scored matches exist but no history, create one snapshot entry
 if(S.participants.length>0 && Object.keys(S.scoredMatches||{}).length>0 && !(S.pointsHistory||[]).length){
   if(!S.pointsHistory) S.pointsHistory=[];
