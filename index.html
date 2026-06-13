@@ -8,6 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <style>
     /* ── TOKENS ── */
     :root {
@@ -368,8 +371,11 @@
     td:not(:first-child):not(:nth-child(2)) { text-align: center; color: var(--muted); font-size: 0.8rem; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(255,255,255,.022); }
-    .td-pos { font-weight: 700; color: var(--muted2); font-size: 0.8rem; width: 32px; }
+    .td-pos { font-weight: 700; color: var(--muted2); font-size: 0.8rem; width: 42px; white-space:nowrap; }
     .td-pos.hi { color: var(--gold); }
+    .pos-up   { color: #27AE60; font-size: 0.72rem; margin-left: 2px; }
+    .pos-down { color: #E74C3C; font-size: 0.72rem; margin-left: 2px; }
+    .pos-same { color: var(--muted2); font-size: 0.72rem; margin-left: 2px; }
     .td-name { font-weight: 700; }
     .td-total { font-weight: 800 !important; color: var(--text) !important; font-size: 0.92rem !important; }
 
@@ -818,6 +824,7 @@
     <div class="nav-right">
       <div class="nav-badge" id="upd-desktop">Sin datos</div>
       <div id="sync-badge" style="font-size:.6rem;color:var(--muted);opacity:.6;letter-spacing:.3px"></div>
+      <div id="fb-status" style="font-size:.65rem;margin-left:6px"></div>
       <button class="nav-admin-btn" data-tab="admin" onclick="switchTab('admin')">Admin</button>
     </div>
   </div>
@@ -852,6 +859,14 @@
           </thead>
           <tbody id="clas-tbody"></tbody>
         </table>
+      </div>
+    </div>
+    <div id="clas-chart-wrap" style="display:none">
+      <div class="card">
+        <div class="card-label">Evolución de puntos</div>
+        <div style="position:relative;height:320px;padding:4px 0 8px">
+          <canvas id="clas-chart-canvas"></canvas>
+        </div>
       </div>
     </div>
   </section>
@@ -922,7 +937,7 @@
 const STORAGE_KEY = 'porra-cooidi-2026-v3';
 const ADMIN_PWD   = 'cooidi2026';
 
-let S = { participants:[], matches:[], predictions:{}, photos:{}, scoredMatches:{}, lastUpdated:null };
+let S = { participants:[], matches:[], predictions:{}, photos:{}, scoredMatches:{}, lastUpdated:null, prevPositions:{}, pointsHistory:[] };
 let adminOpen = false;
 
 // ── AUTO-SYNC (openfootball/worldcup.json — CORS-free, no key) ─────
@@ -1007,15 +1022,75 @@ function startAutoSync(){
 }
 function stopAutoSync(){ clearInterval(_syncInterval); _syncInterval=null; }
 
+// ── FIREBASE ───────────────────────────────────────────────────────
+const FB_CONFIG = {
+  apiKey: "AIzaSyBQFJhayhP2iG9y2a_y7STnDKIUgyQU1eE",
+  authDomain: "porra-mundial-fe219.firebaseapp.com",
+  projectId: "porra-mundial-fe219",
+  storageBucket: "porra-mundial-fe219.firebasestorage.app",
+  messagingSenderId: "534161459721",
+  appId: "1:534161459721:web:e5a219e88f8d55638746d8",
+  databaseURL: "https://porra-mundial-fe219-default-rtdb.firebaseio.com"
+};
+let _fbRef = null;
+
+function fbPayload() {
+  return {
+    participants: S.participants,
+    matches: S.matches,
+    predictions: S.predictions,
+    scoredMatches: S.scoredMatches || {},
+    _prevPreds: S._prevPreds || {},
+    lastUpdated: S.lastUpdated,
+    prevPositions: S.prevPositions || {},
+    pointsHistory: S.pointsHistory || []
+    // photos excluded: base64 demasiado grande para Firebase free tier
+  };
+}
+
+function initFirebase() {
+  try {
+    firebase.initializeApp(FB_CONFIG);
+    const db = firebase.database();
+    _fbRef = db.ref('porra/state');
+
+    // Indicador de conexión
+    db.ref('.info/connected').on('value', snap => {
+      const el = document.getElementById('fb-status');
+      if(el) el.innerHTML = snap.val()
+        ? '<span style="color:#27AE60">●</span>'
+        : '<span style="color:#E74C3C">●</span>';
+    });
+
+    // Listener en tiempo real — se dispara en todos los clientes cuando hay cambios
+    _fbRef.on('value', snapshot => {
+      const data = snapshot.val();
+      if(!data) {
+        // Firebase vacío → subir estado local actual
+        if(S.participants.length > 0) _fbRef.set(fbPayload()).catch(()=>{});
+        return;
+      }
+      const localPhotos = S.photos || {};
+      Object.assign(S, data);
+      S.photos = localPhotos; // fotos solo locales
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
+      renderAll();
+    });
+  } catch(err) {
+    console.warn('Firebase error:', err);
+  }
+}
+
 function loadS() {
+  // Carga localStorage para render instantáneo mientras Firebase conecta
   try { const r=localStorage.getItem(STORAGE_KEY); if(r) Object.assign(S,JSON.parse(r)); } catch(e){}
 }
+
 function saveS() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    participants:S.participants, matches:S.matches, predictions:S.predictions,
-    photos:S.photos, scoredMatches:S.scoredMatches,
-    _prevPreds:S._prevPreds, lastUpdated:S.lastUpdated
-  }));
+  // Guardar en localStorage (caché offline)
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
+  // Guardar en Firebase (sincroniza todos los clientes)
+  if(_fbRef) _fbRef.set(fbPayload()).catch(err => console.warn('Firebase save:', err));
 }
 
 // ── FLAGS ──────────────────────────────────────────────────────────
@@ -1309,6 +1384,7 @@ function renderClasificacion() {
   if (!S.participants.length) {
     document.getElementById('clas-podium').innerHTML='';
     document.getElementById('clas-tbody').innerHTML=`<tr><td colspan="11"><div class="empty"><div class="empty-icon">📊</div><h3>Sin clasificacion</h3><p>Sube el Excel desde Admin para ver la clasificacion</p></div></td></tr>`;
+    const cw=document.getElementById('clas-chart-wrap'); if(cw) cw.style.display='none';
     return;
   }
   const p = S.participants;
@@ -1332,15 +1408,86 @@ function renderClasificacion() {
   </div>`;
 
   const medals3 = ['🥇','🥈','🥉'];
-  document.getElementById('clas-tbody').innerHTML = p.map((pl,i) => `<tr>
-    <td class="td-pos ${i<3?'hi':''}">${medals3[i]||pl.pos}</td>
-    <td class="td-name">${pl.name}</td>
-    <td class="td-total">${pl.totalPts}</td>
-    <td>${pl.gPts}</td><td>${pl.gPosPts}</td>
-    <td>${pl.eq16+pl.pt16}</td><td>${pl.eq8+pl.pt8}</td>
-    <td>${pl.eq4+pl.pt4}</td><td>${pl.eq2+pl.pt2}</td>
-    <td>${pl.ptF+pl.eqF}</td><td>${pl.honor}</td>
-  </tr>`).join('');
+  const prevPos = S.prevPositions || {};
+  document.getElementById('clas-tbody').innerHTML = p.map((pl,i) => {
+    const cur = i+1, prev = prevPos[pl.name];
+    let arrow = '';
+    if(prev && prev !== cur){
+      arrow = prev > cur
+        ? `<span class="pos-up">↑</span>`
+        : `<span class="pos-down">↓</span>`;
+    } else if(prev && prev === cur){
+      arrow = `<span class="pos-same">–</span>`;
+    }
+    return `<tr>
+      <td class="td-pos ${i<3?'hi':''}">${medals3[i]||pl.pos}${arrow}</td>
+      <td class="td-name">${pl.name}</td>
+      <td class="td-total">${pl.totalPts}</td>
+      <td>${pl.gPts}</td><td>${pl.gPosPts}</td>
+      <td>${pl.eq16+pl.pt16}</td><td>${pl.eq8+pl.pt8}</td>
+      <td>${pl.eq4+pl.pt4}</td><td>${pl.eq2+pl.pt2}</td>
+      <td>${pl.ptF+pl.eqF}</td><td>${pl.honor}</td>
+    </tr>`;
+  }).join('');
+  renderPointsChart();
+}
+
+let _clasChart = null;
+const CHART_COLORS = ['#EAC535','#27AE60','#E74C3C','#3498DB','#9B59B6','#F39C12','#1ABC9C','#E91E63','#00BCD4','#FF5722','#8BC34A','#F0E68C','#FF9800','#795548','#2196F3','#4CAF50'];
+
+function renderPointsChart(){
+  const wrap = document.getElementById('clas-chart-wrap');
+  const history = S.pointsHistory || [];
+  if(!history.length || !S.participants.length){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  const canvas = document.getElementById('clas-chart-canvas');
+  if(_clasChart){ _clasChart.destroy(); _clasChart=null; }
+  const labels = history.map(h=>h.label);
+  const datasets = S.participants.map((pl,i)=>({
+    label: pl.name,
+    data: history.map(h=>(h.snapshot&&h.snapshot[pl.name])||0),
+    borderColor: CHART_COLORS[i%CHART_COLORS.length],
+    backgroundColor: CHART_COLORS[i%CHART_COLORS.length]+'33',
+    borderWidth: 2,
+    pointRadius: 4,
+    pointHoverRadius: 6,
+    tension: 0.35,
+    fill: false,
+  }));
+  _clasChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode:'index', intersect:false },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color:'#EDF2F7', font:{ family:'Montserrat', size:11 }, boxWidth:12, padding:10 }
+        },
+        tooltip: {
+          backgroundColor:'#112B40',
+          borderColor:'#1D4262',
+          borderWidth:1,
+          titleColor:'#EAC535',
+          bodyColor:'#EDF2F7',
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y} pts` }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color:'#6B8EA6', font:{ family:'Montserrat', size:10 } },
+          grid: { color:'#1D4262' }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color:'#6B8EA6', font:{ family:'Montserrat', size:10 }, stepSize:1 },
+          grid: { color:'#1D4262' }
+        }
+      }
+    }
+  });
 }
 
 // ── RENDER PARTIDOS ────────────────────────────────────────────────
@@ -2208,8 +2355,24 @@ function applyMatchPoints(matchName, result){
     if(p){p.totalPts+=pts;p.gPts+=pts;}
   });
   S.scoredMatches[matchName]=result;
+  // Snapshot positions before sorting (for arrows)
+  if(!S.prevPositions) S.prevPositions={};
+  S.participants.forEach((p,i)=>{ S.prevPositions[p.name]=p.pos||(i+1); });
   S.participants.sort((a,b)=>b.totalPts-a.totalPts);
   S.participants.forEach((p,i)=>p.pos=i+1);
+  recordHistory(matchName);
+}
+
+function recordHistory(matchKey){
+  if(!S.pointsHistory) S.pointsHistory=[];
+  const snapshot={};
+  S.participants.forEach(p=>{ snapshot[p.name]=p.totalPts; });
+  const parts=matchKey.split('-');
+  const label=parts.length>=2?`${parts[0].substring(0,6)} vs ${parts[parts.length-1].substring(0,6)}`:matchKey.substring(0,14);
+  const idx=S.pointsHistory.findIndex(h=>h.key===matchKey);
+  const entry={key:matchKey, label, time:new Date().toISOString(), snapshot};
+  if(idx>=0) S.pointsHistory[idx]=entry;
+  else S.pointsHistory.push(entry);
 }
 
 // ── RENDER ALL ─────────────────────────────────────────────────────
@@ -2398,6 +2561,9 @@ function initSeedData() {
   };
   S.scoredMatches = { 'México-Sudáfrica': '1|2-0' };
   S.lastUpdated = '2026-06-11T23:00:00.000Z';
+  // Seed initial history entry
+  if(!S.pointsHistory) S.pointsHistory=[];
+  recordHistory('México-Sudáfrica');
   saveS();
 }
 
@@ -2406,8 +2572,14 @@ loadS();
 initSeedData();
 // Auto-migrate existing installs that only have 1-2 matches
 if(S.participants.length>0 && S.matches.length<10) mergeSchedule();
+// Backfill history: if scored matches exist but no history, create one snapshot entry
+if(S.participants.length>0 && Object.keys(S.scoredMatches||{}).length>0 && !(S.pointsHistory||[]).length){
+  if(!S.pointsHistory) S.pointsHistory=[];
+  Object.keys(S.scoredMatches).forEach(k=>recordHistory(k));
+  saveS();
+}
 renderAll();
-// Start auto-sync after a short delay so page renders first
+initFirebase(); // conecta Firebase y activa el listener en tiempo real
 setTimeout(startAutoSync, 1500);
 </script>
 </body>
