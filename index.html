@@ -1036,6 +1036,9 @@ let _fbRef = null;
 let _fbWriteId = null; // ID de nuestra última escritura — para ignorar el echo propio
 
 function fbPayload() {
+  // Firebase no permite '.' '#' '$' '/' '[' ']' en claves.
+  // Los nombres de participantes pueden tener '.' (ej: "Sr. Permanyer")
+  // → prevPositions y pointsHistory.snapshot se convierten a arrays
   return {
     participants: S.participants,
     matches: S.matches,
@@ -1043,10 +1046,33 @@ function fbPayload() {
     scoredMatches: S.scoredMatches || {},
     _prevPreds: S._prevPreds || {},
     lastUpdated: S.lastUpdated,
-    prevPositions: S.prevPositions || {},
-    pointsHistory: S.pointsHistory || []
-    // photos excluded: base64 demasiado grande para Firebase free tier
+    prevPositions: Object.entries(S.prevPositions||{}).map(([name,pos])=>({name,pos})),
+    pointsHistory: (S.pointsHistory||[]).map(h=>({
+      ...h,
+      snapshot: Object.entries(h.snapshot||{}).map(([name,pts])=>({name,pts}))
+    }))
   };
+}
+
+// Reconvertir prevPositions/pointsHistory del formato Firebase (arrays) al formato interno (objetos)
+function fbDeserialize(data) {
+  if(!data) return data;
+  if(Array.isArray(data.prevPositions)){
+    const pp={};
+    data.prevPositions.forEach(e=>{ if(e&&e.name!=null) pp[e.name]=e.pos; });
+    data.prevPositions=pp;
+  }
+  if(Array.isArray(data.pointsHistory)){
+    data.pointsHistory=data.pointsHistory.filter(Boolean).map(h=>{
+      if(Array.isArray(h.snapshot)){
+        const snap={};
+        h.snapshot.forEach(e=>{ if(e&&e.name!=null) snap[e.name]=e.pts; });
+        return {...h, snapshot:snap};
+      }
+      return h;
+    });
+  }
+  return data;
 }
 
 function initFirebase() {
@@ -1072,7 +1098,8 @@ function initFirebase() {
       }
       // Si el _wid coincide con nuestra última escritura, es nuestro propio echo → ignorar
       if(data._wid && data._wid === _fbWriteId) return;
-      // Cambio de otro cliente → aplicar y re-renderizar
+      // Cambio de otro cliente → deserializar, aplicar y re-renderizar
+      fbDeserialize(data);
       const localPhotos = S.photos || {};
       Object.assign(S, data);
       S.photos = localPhotos;
@@ -1084,7 +1111,11 @@ function initFirebase() {
         });
       }
       mergeScheduleLocal();
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...fbPayload(), photos:S.photos})); } catch(e){}
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        participants:S.participants, matches:S.matches, predictions:S.predictions,
+        photos:S.photos, scoredMatches:S.scoredMatches||{}, _prevPreds:S._prevPreds||{},
+        lastUpdated:S.lastUpdated, prevPositions:S.prevPositions||{}, pointsHistory:S.pointsHistory||[]
+      })); } catch(e){}
       renderAll();
     });
   } catch(err) {
@@ -1098,10 +1129,13 @@ function loadS() {
 }
 
 function saveS() {
-  // Generar ID único para esta escritura (evita que el echo Firebase sobreescriba estado local)
   _fbWriteId = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  const payload = {...fbPayload(), _wid: _fbWriteId};
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({...payload, photos:S.photos})); } catch(e){}
+  // localStorage: formato original con objetos (dots en claves no son problema aquí)
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    participants:S.participants, matches:S.matches, predictions:S.predictions,
+    photos:S.photos, scoredMatches:S.scoredMatches||{}, _prevPreds:S._prevPreds||{},
+    lastUpdated:S.lastUpdated, prevPositions:S.prevPositions||{}, pointsHistory:S.pointsHistory||[], _wid:_fbWriteId
+  })); } catch(e){}
   if(_fbRef) _fbRef.set(payload).catch(err => console.warn('Firebase save:', err));
 }
 
