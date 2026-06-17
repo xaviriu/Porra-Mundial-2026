@@ -1045,11 +1045,16 @@ async function syncFromFD(silent=false){
   const statusEl=document.getElementById('sync-status');
   if(!silent&&statusEl) statusEl.innerHTML='<span style="color:var(--muted);font-size:.72rem">Sincronizando con football-data.org...</span>';
   try{
-    // Usamos corsproxy.io para evitar el bloqueo CORS de football-data.org
     const FD_URL='https://api.football-data.org/v4/competitions/WC/matches?season=2026';
-    const resp=await fetch('https://corsproxy.io/?url='+encodeURIComponent(FD_URL),{
-      headers:{'X-Auth-Token':_fdApiKey}
-    });
+    const HEADERS={'X-Auth-Token':_fdApiKey};
+    // Intentar llamada directa primero (football-data.org declara soporte CORS)
+    // Si falla por CORS, reintentar vía proxy
+    let resp;
+    try {
+      resp = await fetch(FD_URL, {headers: HEADERS});
+    } catch(_) {
+      resp = await fetch('https://corsproxy.io/?'+encodeURIComponent(FD_URL), {headers: HEADERS});
+    }
     if(resp.status===401){ throw new Error('API key inválida'); }
     if(resp.status===429){ throw new Error('Límite de peticiones alcanzado (10/min)'); }
     if(!resp.ok) throw new Error('HTTP '+resp.status);
