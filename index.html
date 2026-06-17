@@ -1047,14 +1047,29 @@ async function syncFromFD(silent=false){
   try{
     const FD_URL='https://api.football-data.org/v4/competitions/WC/matches?season=2026';
     const HEADERS={'X-Auth-Token':_fdApiKey};
-    // Intentar llamada directa primero (football-data.org declara soporte CORS)
-    // Si falla por CORS, reintentar vía proxy
     let resp;
+    // 1. En Vercel: usar la función serverless /api/scores (sin CORS, gratis)
+    // 2. En local (file://): llamada directa (CORS no se aplica en file://)
+    // 3. Fallback: proxy CORS
+    const isVercel = location.protocol === 'https:' && location.hostname.includes('vercel.app');
+    const isLocal  = location.protocol === 'file:';
     try {
-      resp = await fetch(FD_URL, {headers: HEADERS});
-    } catch(_) {
-      resp = await fetch('https://corsproxy.io/?'+encodeURIComponent(FD_URL), {headers: HEADERS});
-    }
+      if(isVercel){
+        resp = await fetch('/api/scores');
+        if(resp.status===500){
+          const e=await resp.json().catch(()=>({}));
+          if((e.error||'').includes('not configured'))
+            throw new Error('Configura FD_API_KEY en Vercel → Settings → Environment Variables (es gratis)');
+          throw new Error(e.error||'Error servidor');
+        }
+      } else if(isLocal){
+        resp = await fetch(FD_URL, {headers: HEADERS});
+      } else {
+        // Dominio propio u otro — probar directo y si falla proxy
+        try { resp = await fetch(FD_URL, {headers: HEADERS}); }
+        catch(_){ resp = await fetch('https://corsproxy.io/?'+encodeURIComponent(FD_URL), {headers: HEADERS}); }
+      }
+    } catch(fetchErr){ throw fetchErr; }
     if(resp.status===401){ throw new Error('API key inválida'); }
     if(resp.status===429){ throw new Error('Límite de peticiones alcanzado (10/min)'); }
     if(!resp.ok) throw new Error('HTTP '+resp.status);
