@@ -967,7 +967,7 @@ const API_TEAM_MAP = {
 let _lastSync = null;
 let _syncInterval = null;
 let _autoSyncEnabled = true;
-let _fdApiKey = localStorage.getItem('fd-key') || '';
+let _fdApiKey = true; // activo siempre — la key vive en /api/scores (Vercel env var)
 
 async function syncScores(silent=false){
   const statusEl = document.getElementById('sync-status');
@@ -1035,11 +1035,15 @@ async function syncFromFD(silent=false){
   const statusEl=document.getElementById('sync-status');
   if(!silent&&statusEl) statusEl.innerHTML='<span style="color:var(--muted);font-size:.72rem">Sincronizando con football-data.org...</span>';
   try{
-    const resp=await fetch('https://api.football-data.org/v4/competitions/WC/matches?season=2026',{
-      headers:{'X-Auth-Token':_fdApiKey}
-    });
-    if(resp.status===400){ throw new Error('Temporada 2026 aún no disponible — prueba sin API key'); }
-    if(resp.status===401){ throw new Error('API key inválida'); }
+    // Llamamos a nuestra función serverless en Vercel para evitar CORS
+    const resp=await fetch('/api/scores');
+    if(resp.status===500){
+      const err=await resp.json().catch(()=>({}));
+      // Key no configurada en Vercel → caer en openfootball silenciosamente
+      if(err.error&&err.error.includes('not configured')){ _fdApiKey=false; syncScores(silent); return; }
+      throw new Error(err.error||'Error en el servidor');
+    }
+    if(resp.status===401){ throw new Error('API key inválida — revisa FD_API_KEY en Vercel'); }
     if(resp.status===429){ throw new Error('Límite de peticiones alcanzado (10/min)'); }
     if(!resp.ok) throw new Error('HTTP '+resp.status);
     const data=await resp.json();
@@ -1087,15 +1091,6 @@ async function syncFromFD(silent=false){
   }
 }
 
-function saveFdKey(){
-  const val=(document.getElementById('fd-key-input')?.value||'').trim();
-  _fdApiKey=val;
-  if(val) localStorage.setItem('fd-key',val);
-  else localStorage.removeItem('fd-key');
-  startAutoSync();
-  const btn=document.getElementById('fd-save-btn');
-  if(btn){ btn.textContent='✓ Guardado'; setTimeout(()=>btn.textContent='Guardar',2000); }
-}
 
 // ── FIREBASE ───────────────────────────────────────────────────────
 const FB_CONFIG = {
@@ -1821,20 +1816,18 @@ function renderAdmin() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
         <div style="width:8px;height:8px;border-radius:50%;background:${_fdApiKey?'#27AE60':'#6B8EA6'};flex-shrink:0"></div>
         <span style="font-size:.75rem;font-weight:700;color:${_fdApiKey?'#4ade80':'var(--muted)'}">
-          ${_fdApiKey?'football-data.org activo — resultados en minutos al acabar cada partido':'Sin API key — usando openfootball (delay de horas)'}
+          ${_fdApiKey?'football-data.org activo — resultados en minutos al acabar cada partido':'Configuración pendiente — pon la API key en Vercel'}
         </span>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-        Con una API key gratuita de <b>football-data.org</b> los resultados se actualizan automáticamente en minutos al finalizar cada partido y la clasificación se recalcula sola.
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px">
+        La API key se configura una vez en Vercel (no en el navegador) para que nunca sea visible. Una vez configurada, los resultados se actualizan solos al finalizar cada partido.
       </p>
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-        <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px">
-          <span style="font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">API Key football-data.org</span>
-          <input type="text" id="fd-key-input" value="${_fdApiKey}" placeholder="Pega aquí tu API key..." style="font-family:monospace;font-size:.8rem;letter-spacing:.5px">
-        </label>
-        <button id="fd-save-btn" class="btn btn-gold" style="font-size:.75rem;flex-shrink:0" onclick="saveFdKey()">Guardar</button>
-        ${_fdApiKey?`<button class="btn btn-ghost" style="font-size:.72rem;flex-shrink:0" onclick="document.getElementById('fd-key-input').value='';saveFdKey()">Quitar key</button>`:''}
-      </div>
+      ${!_fdApiKey?`<div class="alert a-inf" style="margin-bottom:12px;font-size:.76rem;line-height:1.7">
+        <b>Pasos para activar:</b><br>
+        1. Ve a <b>vercel.com</b> → tu proyecto → <b>Settings → Environment Variables</b><br>
+        2. Añade: Nombre <b>FD_API_KEY</b> · Valor = tu key de football-data.org<br>
+        3. Guarda y espera el re-deploy (~1 min)
+      </div>`:''}
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
         <button class="btn ${_fdApiKey?'btn-gold':'btn-ghost'}" style="font-size:.75rem" onclick="${_fdApiKey?'syncFromFD(false)':'syncScores(false)'}">Sincronizar ahora</button>
         <label style="display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--muted);cursor:pointer">
@@ -1844,9 +1837,7 @@ function renderAdmin() {
       </div>
       <div id="sync-status" style="min-height:20px"></div>
       <p style="font-size:.68rem;color:var(--muted);margin-top:8px;opacity:.7">
-        ${_fdApiKey
-          ?'⚡ Resultados en minutos al acabar cada partido. Límite: 10 peticiones/min (más que suficiente).'
-          :'⚠️ Sin API key: openfootball/worldcup.json — resultados horas después. Regístrate gratis en <b>football-data.org</b> para resultados inmediatos.'}
+        ${_fdApiKey?'⚡ Resultados en minutos al acabar cada partido.':'⚠️ Sin configurar: usando openfootball (delay de horas).'}
       </p>
     </div>
     <div class="card">
