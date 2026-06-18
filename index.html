@@ -967,7 +967,6 @@ const API_TEAM_MAP = {
 let _lastSync = null;
 let _syncInterval = null;
 let _autoSyncEnabled = true;
-let _fdApiKey = localStorage.getItem('fd-key') || '';
 
 async function syncScores(silent=false){
   const statusEl = document.getElementById('sync-status');
@@ -1012,112 +1011,16 @@ async function syncScores(silent=false){
 
 function startAutoSync(){
   if(_syncInterval) clearInterval(_syncInterval);
+  const hasMatchesToday=S.matches.some(m=>isToday(m.date));
+  const interval=hasMatchesToday?60*1000:3*60*1000; // 1min today, 3min otherwise
   _syncInterval=setInterval(()=>{
-    if(_autoSyncEnabled){ _fdApiKey ? syncFromFD(true) : syncScores(true); }
+    if(_autoSyncEnabled) syncScores(true);
+    // Re-render match cards every minute so EN VIVO appears/disappears in real time
     renderPartidos(); renderInicio();
   }, 60*1000);
-  _fdApiKey ? syncFromFD(false) : syncScores(true);
+  syncScores(true);
 }
 function stopAutoSync(){ clearInterval(_syncInterval); _syncInterval=null; }
-
-// ── FOOTBALL-DATA.ORG LIVE SYNC ────────────────────────────────────
-// Nombres de equipos que football-data.org usa de forma distinta a openfootball
-const FD_EXTRA_MAP = {
-  'Korea Republic':'Corea del Sur', 'United States':'Estados Unidos',
-  'Côte d\'Ivoire':'Costa de Marfil', 'IR Iran':'Irán',
-  'Bosnia and Herzegovina':'Bosnia y Herzegovina',
-  'DR Congo':'RD Congo', 'Congo DR':'RD Congo',
-};
-function fdName(n){ return API_TEAM_MAP[n] || FD_EXTRA_MAP[n] || n; }
-
-function saveFdKey(){
-  const val=(document.getElementById('fd-key-input')?.value||'').trim();
-  _fdApiKey=val;
-  if(val) localStorage.setItem('fd-key',val);
-  else localStorage.removeItem('fd-key');
-  startAutoSync();
-  const btn=document.getElementById('fd-save-btn');
-  if(btn){ btn.textContent='✓ Guardado'; setTimeout(()=>{ btn.textContent='Guardar'; renderAdmin(); },1500); }
-}
-
-async function syncFromFD(silent=false){
-  if(!_fdApiKey) return;
-  const statusEl=document.getElementById('sync-status');
-  if(!silent&&statusEl) statusEl.innerHTML='<span style="color:var(--muted);font-size:.72rem">Sincronizando con football-data.org...</span>';
-  try{
-    const FD_URL='https://api.football-data.org/v4/competitions/WC/matches?season=2026';
-    const HEADERS={'X-Auth-Token':_fdApiKey};
-    let resp;
-    // 1. En Vercel: usar la función serverless /api/scores (sin CORS, gratis)
-    // 2. En local (file://): llamada directa (CORS no se aplica en file://)
-    // 3. Fallback: proxy CORS
-    const isVercel = location.protocol === 'https:' && location.hostname.includes('vercel.app');
-    const isLocal  = location.protocol === 'file:';
-    try {
-      if(isVercel){
-        resp = await fetch('/api/scores');
-        if(resp.status===500){
-          const e=await resp.json().catch(()=>({}));
-          if((e.error||'').includes('not configured'))
-            throw new Error('Configura FD_API_KEY en Vercel → Settings → Environment Variables (es gratis)');
-          throw new Error(e.error||'Error servidor');
-        }
-      } else if(isLocal){
-        resp = await fetch(FD_URL, {headers: HEADERS});
-      } else {
-        // Dominio propio u otro — probar directo y si falla proxy
-        try { resp = await fetch(FD_URL, {headers: HEADERS}); }
-        catch(_){ resp = await fetch('https://corsproxy.io/?'+encodeURIComponent(FD_URL), {headers: HEADERS}); }
-      }
-    } catch(fetchErr){ throw fetchErr; }
-    if(resp.status===401){ throw new Error('API key inválida'); }
-    if(resp.status===429){ throw new Error('Límite de peticiones alcanzado (10/min)'); }
-    if(!resp.ok) throw new Error('HTTP '+resp.status);
-    const data=await resp.json();
-
-    let updated=0, liveCount=0;
-    for(const fm of (data.matches||[])){
-      const home=fdName(fm.homeTeam?.name||'');
-      const away=fdName(fm.awayTeam?.name||'');
-      if(!home||!away) continue;
-      const mObj=S.matches.find(m=>m.home===home&&m.away===away);
-      if(!mObj) continue;
-
-      const st=fm.status; // SCHEDULED TIMED IN_PLAY PAUSED FINISHED SUSPENDED POSTPONED
-      if(st==='IN_PLAY'||st==='PAUSED') liveCount++;
-
-      if(st==='FINISHED'){
-        const hg=fm.score?.fullTime?.home??null;
-        const ag=fm.score?.fullTime?.away??null;
-        if(hg===null||ag===null) continue;
-        const key=`${home}-${away}`;
-        // Solo actualizar si el resultado cambió o no estaba puntuado
-        const alreadyScored=S.scoredMatches&&S.scoredMatches[key];
-        const prevResult=alreadyScored||null;
-        const newResult=`${hg>ag?'1':hg===ag?'X':'2'}|${hg}-${ag}`;
-        if(mObj.homeG===hg&&mObj.awayG===ag&&prevResult===newResult) continue;
-        mObj.homeG=hg; mObj.awayG=ag; updated++;
-        if(S.predictions[key]&&S.predictions[key].length){
-          applyMatchPoints(key,newResult);
-        }
-      }
-    }
-
-    const ts=new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
-    if(updated>0){ S.lastUpdated=new Date().toISOString(); saveS(); renderAll(); }
-    const liveStr=liveCount?` · <span style="color:var(--red)">● ${liveCount} en vivo</span>`:'';
-    const msg=updated>0
-      ?`✓ ${ts} · <b style="color:#4ade80">${updated} resultado${updated>1?'s':''} nuevo${updated>1?'s':''}</b>${liveStr}`
-      :`✓ ${ts} · Sin cambios${liveStr}`;
-    if(statusEl) statusEl.innerHTML=`<span style="font-size:.72rem;color:var(--muted)">${msg}</span>`;
-    const hb=document.getElementById('sync-badge');
-    if(hb) hb.textContent='Live '+ts;
-  }catch(err){
-    if(statusEl) statusEl.innerHTML=`<span style="font-size:.72rem;color:var(--red)">football-data.org: ${err.message}</span>`;
-    console.warn('FD sync error:',err);
-  }
-}
-
 
 // ── FIREBASE ───────────────────────────────────────────────────────
 const FB_CONFIG = {
@@ -1839,35 +1742,17 @@ function renderAdmin() {
       <div class="photo-grid" id="photo-grid-wrap"></div>
     </div>` : ''}
     <div class="card">
-      <div class="card-label" style="margin-bottom:6px">Resultados automáticos en tiempo real</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <div style="width:8px;height:8px;border-radius:50%;background:${_fdApiKey?'#27AE60':'#6B8EA6'};flex-shrink:0"></div>
-        <span style="font-size:.75rem;font-weight:700;color:${_fdApiKey?'#4ade80':'var(--muted)'}">
-          ${_fdApiKey?'football-data.org activo — resultados en minutos al acabar cada partido':'Sin API key — usando openfootball (delay de horas)'}
-        </span>
-      </div>
-      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-        Con tu API key gratuita de <b>football-data.org</b> los resultados llegan en minutos al finalizar cada partido y la clasificación se recalcula sola.
-      </p>
-      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-        <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:200px">
-          <span style="font-size:.6rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">API Key football-data.org</span>
-          <input type="text" id="fd-key-input" value="${_fdApiKey}" placeholder="Pega aquí tu API key..." style="font-family:monospace;font-size:.8rem;letter-spacing:.5px">
-        </label>
-        <button id="fd-save-btn" class="btn btn-gold" style="font-size:.75rem;flex-shrink:0" onclick="saveFdKey()">Guardar</button>
-        ${_fdApiKey?`<button class="btn btn-ghost" style="font-size:.72rem;flex-shrink:0" onclick="document.getElementById('fd-key-input').value='';saveFdKey()">Quitar</button>`:''}
-      </div>
+      <div class="card-label" style="margin-bottom:6px">Sincronización automática de resultados</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">La app descarga resultados automáticamente de <b>openfootball/worldcup.json</b> cada vez que acaba un partido (sin API key, sin coste). La clasificación se actualiza sola.</p>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-        <button class="btn ${_fdApiKey?'btn-gold':'btn-ghost'}" style="font-size:.75rem" onclick="${_fdApiKey?'syncFromFD(false)':'syncScores(false)'}">Sincronizar ahora</button>
+        <button class="btn btn-gold" style="font-size:.75rem" onclick="syncScores(false)">Sincronizar ahora</button>
         <label style="display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--muted);cursor:pointer">
           <input type="checkbox" id="auto-sync-chk" ${_autoSyncEnabled?'checked':''} onchange="_autoSyncEnabled=this.checked;this.checked?startAutoSync():stopAutoSync()">
-          Auto-sync cada 1 min
+          Auto-sync cada ${S.matches.some(m=>isToday(m.date))?'1 min':'3 min'}
         </label>
       </div>
       <div id="sync-status" style="min-height:20px"></div>
-      <p style="font-size:.68rem;color:var(--muted);margin-top:8px;opacity:.7">
-        ${_fdApiKey?'⚡ Resultados en minutos al acabar cada partido. Límite gratuito: 10 peticiones/min.':'⚠️ Sin API key: openfootball — resultados horas después del partido.'}
-      </p>
+      <p style="font-size:.68rem;color:var(--muted);margin-top:8px;opacity:.6">⚠️ Los resultados aparecen cuando los contribuidores del repo publican el partido (generalmente minutos u horas después). No es marcador gol a gol — usa "Marcador en vivo" para eso.</p>
     </div>
     <div class="card">
       <div class="card-label" style="margin-bottom:6px">Calendario de partidos</div>
