@@ -1577,15 +1577,19 @@ function renderPredMatchSelect() {
 // Returns "sign|home-away" e.g. "1|2-0", "X|1-1", "2|0-1"
 function findResult(label) {
   const clean = label.replace(/\n.*/,'').trim();
-  // Label format: "México-Sudáfrica" or "TeamA - TeamB"
-  const sep = clean.includes(' - ') ? ' - ' : '-';
-  const parts = clean.split(sep);
-  if (parts.length < 2) return null;
-  const hq = parts[0].trim().toLowerCase().substring(0, 5);
-  const aq = parts[parts.length-1].trim().toLowerCase().substring(0, 5);
-  const m = S.matches.find(m =>
-    m.home.toLowerCase().startsWith(hq) || m.away.toLowerCase().startsWith(aq)
-  );
+  // Try exact key match first (most reliable)
+  let m = S.matches.find(m => `${m.home}-${m.away}` === clean);
+  if (!m) {
+    // Fall back to fuzzy — must match BOTH home AND away prefix
+    const sep = clean.includes(' - ') ? ' - ' : '-';
+    const parts = clean.split(sep);
+    if (parts.length < 2) return null;
+    const hq = parts[0].trim().toLowerCase().substring(0, 5);
+    const aq = parts[parts.length-1].trim().toLowerCase().substring(0, 5);
+    m = S.matches.find(m =>
+      m.home.toLowerCase().startsWith(hq) && m.away.toLowerCase().startsWith(aq)
+    );
+  }
   if (!m || m.homeG === null || m.awayG === null) return null;
   const sign = m.homeG > m.awayG ? '1' : m.homeG === m.awayG ? 'X' : '2';
   return `${sign}|${m.homeG}-${m.awayG}`;
@@ -1845,11 +1849,16 @@ function updateLiveScore(finish){
       time:'',round:'',home:hTeam,away:aTeam||'?',homeG:hg,awayG:ag});
   }
 
-  // Buscar predicciones: clave exacta o por equipo local
+  // Buscar predicciones: clave exacta o por ambos equipos
   let predKey=key;
   if(!S.predictions[key]||!S.predictions[key].length){
-    const homeQ=key.split('-')[0].toLowerCase();
-    const alt=Object.keys(S.predictions).find(k=>k.toLowerCase().startsWith(homeQ.substring(0,5)));
+    const kp=key.split('-');
+    const hq=kp[0].toLowerCase().substring(0,5);
+    const aq=kp[kp.length-1].toLowerCase().substring(0,5);
+    const alt=Object.keys(S.predictions).find(k=>{
+      const kp2=k.split('-');
+      return k.toLowerCase().startsWith(hq)&&kp2[kp2.length-1].toLowerCase().startsWith(aq);
+    });
     if(alt) predKey=alt;
   }
   if(!S.predictions[predKey]||!S.predictions[predKey].length){
