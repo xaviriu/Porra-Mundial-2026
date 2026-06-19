@@ -1020,6 +1020,10 @@ function initFirebase() {
       const localPhotos = S.photos || {};
       Object.assign(S, data);
       S.photos = localPhotos;
+      // Firebase elimina objetos vacíos como null — normalizar
+      if(!S.predictions || typeof S.predictions !== 'object' || Array.isArray(S.predictions)) S.predictions = {};
+      if(!S.scoredMatches || typeof S.scoredMatches !== 'object') S.scoredMatches = {};
+      if(!Array.isArray(S.participants)) S.participants = S.participants ? Object.values(S.participants) : [];
       // Firebase elimina nulls — restaurar homeG/awayG como null en partidos sin resultado
       if(Array.isArray(S.matches)) {
         S.matches.forEach(m => {
@@ -1041,8 +1045,9 @@ function initFirebase() {
 }
 
 function loadS() {
-  // Carga localStorage para render instantáneo mientras Firebase conecta
   try { const r=localStorage.getItem(STORAGE_KEY); if(r) Object.assign(S,JSON.parse(r)); } catch(e){}
+  if(!S.predictions || typeof S.predictions !== 'object' || Array.isArray(S.predictions)) S.predictions = {};
+  if(!S.scoredMatches || typeof S.scoredMatches !== 'object') S.scoredMatches = {};
 }
 
 function saveS() {
@@ -2308,8 +2313,9 @@ function confirmOCRImport(){
     const matchResult=document.getElementById('ocr-match-result').value.trim().toUpperCase();
     if(!rawName){alert('Indica el nombre del partido');return;}
 
-    // Garantizar que S.matches es array
+    // Garantizar que S.matches es array y S.predictions es objeto
     if(!Array.isArray(S.matches)) S.matches=Object.values(S.matches||{});
+    if(!S.predictions || typeof S.predictions !== 'object' || Array.isArray(S.predictions)) S.predictions={};
 
     // Normalizar clave al formato exacto del partido (Home-Away)
     const matchName=canonicalMatchKey(rawName);
