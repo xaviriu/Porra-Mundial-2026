@@ -2060,7 +2060,8 @@ function parsePasteData(raw){
   const PRED_EXACT = /^([12X])\|(\d+)-(\d+)$/i;
 
   for(const rawLine of lines){
-    const cols = rawLine.split('\t').map(c=>c.trim());
+    // Strip Excel TSV quoting: cells with newlines are wrapped in "..." — remove surrounding quotes
+    const cols = rawLine.split('\t').map(c=>c.trim().replace(/^"|"$/g,'').trim());
 
     for(const col of cols){
       // Result in parens: (1|2-1)
@@ -2274,7 +2275,7 @@ function showOCRPreview(matchName, matchResult, entries, container, statusEl){
     ${banner}
     <div class="ocr-match-inputs">
       <label><span>Partido</span>
-        <input class="ocr-match-name-input" id="ocr-match-name" value="${matchName}" placeholder="México-Sudáfrica">
+        <input class="ocr-match-name-input" id="ocr-match-name" value="${(matchName||'').replace(/"/g,'&quot;')}" placeholder="México-Sudáfrica">
       </label>
       <label><span>Resultado final</span>
         <input class="ocr-result-input" id="ocr-match-result" value="${matchResult||''}" placeholder="1|2-0" maxlength="7">
