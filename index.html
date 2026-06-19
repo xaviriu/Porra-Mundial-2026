@@ -2297,13 +2297,18 @@ function addOCRRow(){
 }
 
 function canonicalMatchKey(rawName){
-  // Busca el partido en S.matches y devuelve la clave exacta "Home-Away"
-  const homeQ=rawName.split(/\s*[-–\s]\s*/)[0].toLowerCase().trim();
+  const clean=rawName.trim();
+  // Exact match first
+  const exact=S.matches.find(m=>`${m.home}-${m.away}`===clean);
+  if(exact) return `${exact.home}-${exact.away}`;
+  // Fuzzy: home prefix at START of string AND away prefix anywhere in string
+  // Uses startsWith for home (avoids confusing "Estados Unidos-Paraguay" with "Estados Unidos-Australia")
+  const cl=clean.toLowerCase();
   const m=S.matches.find(m=>
-    m.home.toLowerCase().includes(homeQ.substring(0,5))||
-    homeQ.includes(m.home.toLowerCase().substring(0,5))
+    cl.startsWith(m.home.toLowerCase().substring(0,5)) &&
+    cl.includes(m.away.toLowerCase().substring(0,5))
   );
-  return m ? `${m.home}-${m.away}` : rawName;
+  return m ? `${m.home}-${m.away}` : clean;
 }
 
 function showToast(msg, duration=4000){
