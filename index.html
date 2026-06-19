@@ -1500,7 +1500,9 @@ function renderPredMatchSelect() {
   sel.innerHTML=keys.length?keys.map(k=>{
     const m=S.matches.find(m=>`${m.home}-${m.away}`===k);
     const done=m&&(m.homeG!==null&&m.awayG!==null||(isPast(m.date)&&!isToday(m.date)));
-    return `<option value="${k}">${done?'✅ ':''}${k}</option>`;
+    const upcoming=m&&!isPast(m.date)&&!isToday(m.date)&&m.homeG===null;
+    const emoji=done?'✅ ':upcoming?'❓ ':'';
+    return `<option value="${k}">${emoji}${k}</option>`;
   }).join(''):`<option value="">Sin datos</option>`;
 }
 // Returns "sign|home-away" e.g. "1|2-0", "X|1-1", "2|0-1"
@@ -2096,6 +2098,12 @@ function onPasteImport(){
   if(!raw.trim()){ st.innerHTML=''; pv.innerHTML=''; return; }
 
   const {matchName, matchResult, entries} = parsePasteData(raw);
+  const canonKey = canonicalMatchKey(matchName||'');
+  const matchInSchedule = S.matches.find(m=>`${m.home}-${m.away}`===canonKey);
+  st.innerHTML=`<div class="alert a-inf" style="font-size:.72rem;margin-bottom:4px">
+    <b>Debug:</b> Partido detectado: "<b>${matchName||'—'}</b>" → clave: "<b>${canonKey}</b>" ${matchInSchedule?'✓ en calendario':'⚠️ NO encontrado en calendario'} · Jugadores: <b>${entries.length}/${S.participants.length}</b> · Resultado: <b>${matchResult||'—'}</b>
+    <br><span style="opacity:.7">Participantes en memoria: ${S.participants.length} | Predicciones guardadas: ${Object.keys(S.predictions||{}).length}</span>
+  </div>`;
   showOCRPreview(matchName, matchResult, entries, pv, st);
 }
 
