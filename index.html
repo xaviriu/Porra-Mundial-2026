@@ -1489,7 +1489,11 @@ function renderPartidos() {
 function renderPredMatchSelect() {
   const sel=document.getElementById('pred-sel');
   const keys=Object.keys(S.predictions);
-  sel.innerHTML=keys.length?keys.map(k=>`<option value="${k}">${k}</option>`).join(''):`<option value="">Sin datos</option>`;
+  sel.innerHTML=keys.length?keys.map(k=>{
+    const m=S.matches.find(m=>`${m.home}-${m.away}`===k);
+    const done=m&&(m.homeG!==null&&m.awayG!==null||(isPast(m.date)&&!isToday(m.date)));
+    return `<option value="${k}">${done?'✅ ':''}${k}</option>`;
+  }).join(''):`<option value="">Sin datos</option>`;
 }
 // Returns "sign|home-away" e.g. "1|2-0", "X|1-1", "2|0-1"
 function findResult(label) {
