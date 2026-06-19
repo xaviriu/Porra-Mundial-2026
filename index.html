@@ -1015,6 +1015,9 @@ function initFirebase() {
       }
       // Si el _wid coincide con nuestra última escritura, es nuestro propio echo → ignorar
       if(data._wid && data._wid === _fbWriteId) return;
+      // Si el dato de Firebase es más antiguo que nuestro último guardado local → ignorar
+      // (evita que el estado antiguo del reset sobrescriba predicciones recién guardadas)
+      if(S.lastUpdated && data.lastUpdated && data.lastUpdated < S.lastUpdated) return;
       // Cambio de otro cliente → deserializar, aplicar y re-renderizar
       fbDeserialize(data);
       const localPhotos = S.photos || {};
